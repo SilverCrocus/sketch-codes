@@ -4,12 +4,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 import random
-from typing import List, Literal, Dict, Any
+from typing import List, Dict, Any, Optional
 import uuid
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError, ConfigDict
 import json
 from fastapi import status
-from fastapi.websockets import WebSocketState
+from starlette.websockets import WebSocketState
 
 from words import WORD_LIST
 
@@ -33,19 +33,17 @@ class Stroke(BaseModel):
     tool: str = "pen" # 'pen' or 'eraser'
 
 class GameState(BaseModel):
-    grid: list[str]
-    key_a: list[str]
-    key_b: list[str]
-    revealed: list[str]
-    turn: Literal['A', 'B']
-    strokes: List[Stroke] = Field(default_factory=list)
-    turn_count: int = 0
-    finished: bool = False
-    game_id: str
-    clients: Dict[str, WebSocket] = Field(default_factory=dict)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    class Config:
-        arbitrary_types_allowed = True
+    game_id: str
+    clients: Dict[str, WebSocket] = {}
+    strokes: List[Stroke] = []
+    # Turn and game flow management
+    current_drawing_player_id: Optional[str] = None
+    current_guessing_player_id: Optional[str] = None
+    drawing_phase_active: bool = True # Starts true, waiting for first drawer
+    drawing_submitted: bool = False
+    turn_number: int = 1 # Game starts with turn 1
 
 class WebSocketMessagePayload(BaseModel):
     clientId: str | None = None
@@ -101,6 +99,41 @@ async def broadcast_to_room(game_id: str, message_data: dict, sender_client_id: 
                 except Exception as e:
                     print(f"Error broadcasting to client {client_id} in game {game_id}: {e}")
                     # Consider removing dead connections here
+
+async def broadcast_game_state(game_id: str):
+    if game_id not in active_games:
+        print(f"broadcast_game_state: Game {game_id} not found.")
+        return
+
+    game_state = active_games[game_id]
+    connected_client_ids = list(game_state.clients.keys()) # Get IDs from the actual WebSocket objects
+
+    # Prepare a serializable version of the game state
+    # Crucially, exclude the 'clients' field which contains non-serializable WebSocket objects
+    serializable_game_data = game_state.model_dump(exclude={'clients'})
+
+    message_payload = {
+        "type": "GAME_STATE_UPDATE",
+        "payload": {
+            **serializable_game_data,
+            "connected_client_ids": connected_client_ids # Add the list of client IDs
+        }
+    }
+
+    print(f"Broadcasting GAME_STATE_UPDATE to {len(connected_client_ids)} clients in game {game_id}: {message_payload}")
+    # Broadcasting to all, including the client that might have triggered the state change,
+    # to ensure all clients have the definitive state.
+    message_json = json.dumps(message_payload)
+    for client_websocket in game_state.clients.values():
+        try:
+            await client_websocket.send_text(message_json)
+        except WebSocketDisconnect:
+            # This client disconnected before we could send the message.
+            # The main cleanup logic in websocket_endpoint's finally block will handle it.
+            print(f"Client disconnected during broadcast in game {game_id}. Will be cleaned up.")
+        except Exception as e:
+            print(f"Error broadcasting game state to a client in game {game_id}: {e}")
+            # Potentially handle client disconnection here if send fails repeatedly
 
 # Ensure the frontend build directory exists for static file serving
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
@@ -158,8 +191,9 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
 
     try:
         # Send existing strokes to the newly connected client
-        if established_game_id in active_games: # Re-check, game might have been deleted by another client disconnect
-            initial_strokes_payload = [stroke.model_dump() for stroke in active_games[established_game_id].strokes]
+        if established_game_id in active_games: # Re-check, game might have been deleted
+            game_for_initial_strokes = active_games[established_game_id]
+            initial_strokes_payload = [stroke.model_dump() for stroke in game_for_initial_strokes.strokes]
             await websocket.send_text(json.dumps({
                 "type": "INITIAL_STROKES", 
                 "payload": initial_strokes_payload,
@@ -167,22 +201,40 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
             }))
             print(f"Sent {len(initial_strokes_payload)} initial strokes to client {established_client_id} for game {established_game_id}")
         else:
-            print(f"Game {established_game_id} was removed before initial strokes could be sent to {established_client_id}. Connection will close.")
-            # No explicit close here, let the main try/finally handle cleanup as connection will likely be dead.
+            print(f"Game {established_game_id} was removed before initial strokes could be sent to {established_client_id}.")
+
+        # Assign roles and broadcast game state
+        if established_game_id in active_games:
+            current_game_state = active_games[established_game_id]
+            player_role_changed = False
+            if current_game_state.current_drawing_player_id is None:
+                current_game_state.current_drawing_player_id = established_client_id
+                print(f"Client {established_client_id} assigned as DRAWING player for game {established_game_id}.")
+                player_role_changed = True
+            elif current_game_state.current_guessing_player_id is None and established_client_id != current_game_state.current_drawing_player_id:
+                current_game_state.current_guessing_player_id = established_client_id
+                print(f"Client {established_client_id} assigned as GUESSING player for game {established_game_id}.")
+                player_role_changed = True
+            
+            if player_role_changed:
+                await broadcast_game_state(established_game_id)
+            else:
+                # If no roles changed (e.g., a third player joins, or a player reconnects),
+                # still send them the current game state individually so they are up to speed.
+                # The broadcast_game_state would also cover this, but this is more direct for the new client.
+                # However, INITIAL_STROKES + a follow-up GAME_STATE_UPDATE (if roles changed) or just one full state message?
+                # For now, new connections get INITIAL_STROKES. If their connection triggers a role change, all get GAME_STATE_UPDATE.
+                # If no role change, this new client might not have the full game state beyond strokes.
+                # Let's ensure new client always gets full state after initial strokes, even if no roles changed.
+                # Simplest: always call broadcast_game_state after a client connects and initial strokes are sent.
+                # The `if player_role_changed` was an optimization, but clarity and correctness are better here.
+                # Let's send the full game state to this specific client if roles didn't change, or broadcast if they did.
+                # Decision: Always broadcast after new client setup. This simplifies logic.
+                # The previous thought about sending only to new client if no role change is more complex to maintain.
+                await broadcast_game_state(established_game_id)
 
     except WebSocketDisconnect:
-        print(f"Client {established_client_id} disconnected before or during initial strokes sending for game {established_game_id}.")
-        # Allow finally block to handle cleanup
-        # No re-raise, as we want the finally block to execute cleanly.
-        # The connection is already gone or going.
-        # Ensure the 'finally' block is robust enough.
-        # We might not need to do much more here as the 'finally' should catch it.
-        # Pass or return, as the connection is unusable.
-        # Force outer try-except to go to finally by re-raising or returning from main function.
-        # For simplicity, we'll let it flow to the main finally block.
-        # If this specific disconnect needs special handling, add it here.
-        # For now, logging is sufficient, the main finally will handle client removal.
-        pass # The connection is dead, proceed to finally for cleanup
+        print(f"Client {established_client_id} disconnected before or during initial strokes/state sending for game {established_game_id}.")
     except Exception as e_initial_send:
         print(f"Error sending initial strokes to client {established_client_id} in game {established_game_id}: {e_initial_send}")
         # Attempt to close gracefully if possible, then allow finally to clean up.
@@ -305,20 +357,27 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
             print(f"Could not send error to client after exception: {send_error}")
     finally:
         print(f"Cleaning up connection for client {established_client_id} in game {established_game_id}")
-        if established_game_id and established_client_id and established_game_id in active_games:
-            if established_client_id in active_games[established_game_id].clients:
-                del active_games[established_game_id].clients[established_client_id]
-                print(f"Removed client {established_client_id} from game {established_game_id}.")
-                if not active_games[established_game_id].clients: # If game is empty
-                    print(f"Game {established_game_id} is now empty. Removing from active_games.")
-                    del active_games[established_game_id]
-        # Ensure WebSocket is closed
-        # Check readyState before attempting to close, as it might already be closed by WebSocketDisconnect
+        await handle_disconnect(established_game_id, established_client_id, websocket)
+        # Ensure the websocket is still in a connected state before trying to close explicitly
+        # as it might have been closed by the client or an earlier exception.
         if websocket.client_state == WebSocketState.CONNECTED:
-            await websocket.close()
-            print(f"WebSocket connection explicitly closed for {established_client_id} in {established_game_id}.")
-        elif websocket.client_state == WebSocketState.DISCONNECTED:
-            print(f"WebSocket already disconnected for {established_client_id} in {established_game_id}.")
+            try:
+                await websocket.close()
+                print(f"WebSocket connection closed for client {established_client_id} in game {established_game_id}")
+            except RuntimeError as e:
+                # This can happen if the connection is already closed by the client side abruptly
+                print(f"RuntimeError when trying to close WebSocket for {established_client_id} in {established_game_id}: {e}. Connection likely already severed.")
+        else:
+            print(f"WebSocket for client {established_client_id} in game {established_game_id} already in state: {websocket.client_state}. No explicit close needed from finally block.")
+
+async def handle_disconnect(game_id: str, client_id: str, websocket: WebSocket):
+    if game_id and client_id and game_id in active_games:
+        if client_id in active_games[game_id].clients:
+            del active_games[game_id].clients[client_id]
+            print(f"Removed client {client_id} from game {game_id}.")
+            if not active_games[game_id].clients: # If game is empty
+                print(f"Game {game_id} is now empty. Removing from active_games.")
+                del active_games[game_id]
 
 @app.get("/api/words", response_model=List[str])
 async def get_random_words():
@@ -330,28 +389,25 @@ async def get_random_words():
 # --- Game Management API Endpoints --- 
 @app.post("/api/create_game")
 async def create_game():
-    game_id = generate_memorable_game_id()
+    game_id_candidate = generate_memorable_game_id()
+    # Ensure the generated ID is truly unique (highly likely, but good practice)
+    while game_id_candidate in active_games:
+        game_id_candidate = generate_memorable_game_id()
     
-    # Initialize basic game state
-    initial_words = await get_random_words() # Use existing function for words
-    
-    # For now, keys are simplified as per Day 2a scope. Real key gen is Day 5.
-    placeholder_key = ['N'] * 25 
-    initial_revealed = [''] * 25
+    game_id = game_id_candidate
 
     game_state = GameState(
-        grid=initial_words,
-        key_a=list(placeholder_key), # Ensure new list instances
-        key_b=list(placeholder_key),
-        revealed=list(initial_revealed),
-        turn=random.choice(['A', 'B']),
+        game_id=game_id,
+        clients={},
         strokes=[],
-        turn_count=0,
-        finished=False,
-        game_id=game_id
+        current_drawing_player_id=None, # To be set when the first player connects
+        current_guessing_player_id=None, # To be set when the second player connects
+        drawing_phase_active=True, # Game starts in a drawing phase (or waiting for drawer)
+        drawing_submitted=False,
+        turn_number=1
     )
     active_games[game_id] = game_state
-    print(f"CREATE_GAME: Game '{game_id}' created. Active games now: {list(active_games.keys())}")
+    print(f"Game {game_id} created. Initial state: {game_state.model_dump()}")
     return {"game_id": game_id, "message": f"Game {game_id} created."}
 
 # Serve the index.html for the root path and any other path not caught by other routes

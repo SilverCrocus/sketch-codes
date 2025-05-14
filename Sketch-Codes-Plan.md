@@ -98,10 +98,10 @@ class GameState(BaseModel):
 | **1** | Repo scaffold; serve static React app; `/ws` echo. | ✅ Done | Basic Vite frontend serving `index.html` and `App.tsx`. Backend `main.py` exists. `/ws` echo TBD. |
 | **2** | WordGrid component + random word endpoint. | ✅ Done | `WordGrid.tsx` fetches words from backend `/api/words`. Backend serves placeholder words. |
 | **2a** | **Lobby/Game Creation Flow (Initial)** | ✅ Done | - `HomePage.tsx` & `GamePage.tsx` created.<br>- `react-router-dom` installed.<br>- Frontend routes (`/` and `/game/:gameId`) set up.<br>- `WordGrid` moved into `GamePage`.<br>- "Create Game" navigation implemented (frontend `gameId` generation).<br>- Backend: `/api/create_game` endpoint & basic in-memory game session management implemented.<br>- Frontend: "Join Game" UI and logic implemented. | 
-| **3** | DrawingCanvas ↔ realtime strokes. | 🚧 Partially Done / Needs Debugging | Basic drawing sending and receiving implemented. WebSocket connection stability issues encountered (client reports disconnections). Current focus is on stabilizing this. | 
+| **3** | DrawingCanvas ↔ realtime strokes. | ✅ Done | Real-time stroke synchronization is stable. Addressed WebSocket disconnection issues. Eraser and clear canvas also functional. |
 | **4** | Guess logic & colour feedback. | ⏳ To Do |  | 
 | **5** | Key generator w/ correct overlaps; win/loss detection. | ⏳ To Do |  | 
-| **5a** | Eraser Functionality for DrawingCanvas | ⏳ To Do | Implement ability to erase strokes or parts of strokes. Consider if this has game mechanic implications (e.g., costs a turn/token). | 
+| **5a** | Eraser Functionality for DrawingCanvas | ✅ Done | Eraser tool implemented on frontend and backend. |
 | **5b** | "Submit Drawing" Mechanism | ⏳ To Do | Allow a player to finalize their drawing, potentially locking the canvas for them and notifying other players. | 
 | **6** | UI polish (sidebar, banners, mobile). | ⏳ To Do | May include UI for eraser/submit if not done prior. | 
 | **7** | Persistent game history, rematch flow, dark‑mode toggle. | ⏳ To Do |  | 
@@ -140,7 +140,7 @@ class GameState(BaseModel):
 -   [ ] **Drawing Tools:**
     -   [ ] Color Picker
     -   [ ] Brush Size Selector
-    -   [ ] **Eraser Tool** 
-    -   [ ] Clear Canvas Button
+    -   [x] **Eraser Tool** - DONE
+    -   [x] Clear Canvas Button - DONE
 -   [ ] **Word Management:**
     -   [ ] Word list storage (e.g., in a Python file or simple text file).
