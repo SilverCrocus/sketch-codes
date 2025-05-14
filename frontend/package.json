@@ -21,8 +21,10 @@
   },
   "dependencies": {
     "@types/react-router-dom": "^5.3.3",
+    "konva": "^9.3.20",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-konva": "^19.0.3",
     "react-router-dom": "^7.6.0"
   }
 }

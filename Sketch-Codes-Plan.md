@@ -96,13 +96,15 @@ class GameState(BaseModel):
 | Day | Milestone | Status | Notes |
 |-----|-----------|--------|-------|
 | **1** | Repo scaffold; serve static React app; `/ws` echo. | ✅ Done | Basic Vite frontend serving `index.html` and `App.tsx`. Backend `main.py` exists. `/ws` echo TBD. |
-| **2** | WordGrid component + random word endpoint. | ✅ Done | `WordGrid.tsx` fetches words from backend `/api/words`. Backend serves placeholder words (actual random word generation TBD). |
-| **2a** | **Lobby/Game Creation Flow (Initial)** | 🚧 In Progress | - Created `HomePage.tsx` & `GamePage.tsx` (placeholder).<br>- Installed `react-router-dom`.<br>- Set up basic frontend routes (`/` and `/game/:gameId`).<br>**Next:**<br>  - Move `WordGrid` into `GamePage`.<br>  - Implement "Create Game" navigation from `HomePage` to `GamePage` (frontend `gameId` generation for now).<br>  - Backend: `/create_game` endpoint & basic game session management.<br>  - Frontend: "Join Game" UI and logic. |
-| **3** | DrawingCanvas ↔ realtime strokes. | ⏳ To Do |  |
-| **4** | Guess logic & colour feedback. | ⏳ To Do |  |
-| **5** | Key generator w/ correct overlaps; win/loss detection. | ⏳ To Do |  |
-| **6** | UI polish (sidebar, banners, mobile). | ⏳ To Do |  |
-| **7** | Persistent game history, rematch flow, dark‑mode toggle. | ⏳ To Do |  |
+| **2** | WordGrid component + random word endpoint. | ✅ Done | `WordGrid.tsx` fetches words from backend `/api/words`. Backend serves placeholder words. |
+| **2a** | **Lobby/Game Creation Flow (Initial)** | ✅ Done | - `HomePage.tsx` & `GamePage.tsx` created.<br>- `react-router-dom` installed.<br>- Frontend routes (`/` and `/game/:gameId`) set up.<br>- `WordGrid` moved into `GamePage`.<br>- "Create Game" navigation implemented (frontend `gameId` generation).<br>- Backend: `/api/create_game` endpoint & basic in-memory game session management implemented.<br>- Frontend: "Join Game" UI and logic implemented. | 
+| **3** | DrawingCanvas ↔ realtime strokes. | 🚧 Partially Done / Needs Debugging | Basic drawing sending and receiving implemented. WebSocket connection stability issues encountered (client reports disconnections). Current focus is on stabilizing this. | 
+| **4** | Guess logic & colour feedback. | ⏳ To Do |  | 
+| **5** | Key generator w/ correct overlaps; win/loss detection. | ⏳ To Do |  | 
+| **5a** | Eraser Functionality for DrawingCanvas | ⏳ To Do | Implement ability to erase strokes or parts of strokes. Consider if this has game mechanic implications (e.g., costs a turn/token). | 
+| **5b** | "Submit Drawing" Mechanism | ⏳ To Do | Allow a player to finalize their drawing, potentially locking the canvas for them and notifying other players. | 
+| **6** | UI polish (sidebar, banners, mobile). | ⏳ To Do | May include UI for eraser/submit if not done prior. | 
+| **7** | Persistent game history, rematch flow, dark‑mode toggle. | ⏳ To Do |  | 
 
 ---
 
@@ -116,3 +118,29 @@ class GameState(BaseModel):
 ---
 
 *Enjoy building Sketch‑Codes and may your stick‑figures guide Ning to victory!*  
+
+### Phase 1: Core Game Setup & Basic Drawing (Complete)
+
+-   [x] **Backend**: Basic FastAPI setup.
+-   [x] **Backend**: WebSocket endpoint (`/ws`) for real-time communication.
+-   [x] **Backend**: Game creation endpoint (`/api/create_game`) - **DONE (Now uses memorable IDs)**
+-   [x] **Backend**: Store active games and connected clients in memory.
+-   [x] **Frontend**: Basic React setup with Vite.
+-   [x] **Frontend**: `HomePage` to create or join a game.
+-   [x] **Frontend**: `GamePage` to display the game.
+-   [x] **Frontend**: Connect to WebSocket on `GamePage` mount.
+-   [x] **Frontend**: Basic drawing capability using Konva.js on `DrawingCanvas` component.
+-   [x] **Real-time Sync**: Broadcast drawing data (strokes) to all clients in the same game room.
+-   [x] **Stability**: Ensure WebSocket connection uses server-generated `game_id` - **DONE**
+-   [x] **UX**: Game IDs are memorable (e.g., "FunnyCat123") - **DONE**
+-   [x] **UX**: Joining a game via ID is case-insensitive - **DONE**
+
+### Phase 2: Core Gameplay Features
+
+-   [ ] **Drawing Tools:**
+    -   [ ] Color Picker
+    -   [ ] Brush Size Selector
+    -   [ ] **Eraser Tool** 
+    -   [ ] Clear Canvas Button
+-   [ ] **Word Management:**
+    -   [ ] Word list storage (e.g., in a Python file or simple text file).
