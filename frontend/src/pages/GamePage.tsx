@@ -54,7 +54,8 @@ const GamePage: React.FC = () => {
   const { gameId = "default-game" } = useParams<{ gameId?: string }>();
   const navigate = useNavigate();
   const [clientId] = useState<string>(() => generateClientId()); 
-  const [strokes, setStrokes] = useState<StrokeData[]>([]); 
+  const [strokes, setStrokes] = useState<StrokeData[]>([]);
+  const [localStrokes, setLocalStrokes] = useState<StrokeData[]>([]);
   const [currentTool, setCurrentTool] = useState<'pen' | 'eraser'>('pen');
   const ws = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -156,6 +157,26 @@ const GamePage: React.FC = () => {
             setTurnNumber(newTurnNumber);
             setConnectedClientIds(updatedConnectedClientIds || []);
             break;
+          case 'GAME_STATE': {
+            console.log('Received GAME_STATE update');
+            const gameState = message.payload as GameStatePayload;
+            // Map strokes from backend format to frontend format
+            const mappedStrokes = gameState.strokes.map(mapBackendStrokeToFrontendStroke);
+            setStrokes(mappedStrokes);
+            
+            // If drawing is submitted, reset local strokes as they're now part of the official game state
+            if (gameState.drawing_submitted) {
+              setLocalStrokes([]);
+            }
+            
+            setCurrentDrawingPlayerId(gameState.current_drawing_player_id);
+            setCurrentGuessingPlayerId(gameState.current_guessing_player_id);
+            setDrawingPhaseActive(gameState.drawing_phase_active);
+            setDrawingSubmitted(gameState.drawing_submitted);
+            setTurnNumber(gameState.turn_number);
+            setConnectedClientIds(gameState.connected_client_ids);
+            break;
+          }
           case 'PLAYER_JOINED': // These might be folded into GAME_STATE_UPDATE
           case 'PLAYER_LEFT':   // Or handled if they carry specific data not in GAME_STATE_UPDATE
             if (message.payload && Array.isArray(message.payload.connected_client_ids)) {
@@ -259,6 +280,21 @@ const GamePage: React.FC = () => {
       }
 
       if (pointsNested.length > 0) { 
+        // Create a local stroke with a temporary ID
+        const localStrokeId = `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const localStroke: StrokeData = {
+          id: localStrokeId,
+          points: newStrokeFromCanvas.points,
+          color: newStrokeFromCanvas.color,
+          width: newStrokeFromCanvas.width,
+          tool: newStrokeFromCanvas.tool,
+          clientId: clientId
+        };
+        
+        // Add the stroke to local strokes for immediate display
+        setLocalStrokes(prev => [...prev, localStroke]);
+        
+        // Also send it to the server
         handleSendStroke(
           pointsNested,
           newStrokeFromCanvas.color,
@@ -275,6 +311,8 @@ const GamePage: React.FC = () => {
 
   const handleClearCanvas = () => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN && clientId) { 
+      // Clear local strokes immediately for the drawer
+      setLocalStrokes([]);
       ws.current.send(JSON.stringify({ type: 'CLEAR_CANVAS', gameId: gameId, payload: { clientId: clientId } }));
     }
   };
@@ -283,6 +321,7 @@ const GamePage: React.FC = () => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       console.log('Sending SUBMIT_DRAWING');
       ws.current.send(JSON.stringify({ type: 'SUBMIT_DRAWING', gameId: gameId, clientId: clientId })); 
+      // Local strokes will be cleared when we receive the GAME_STATE response with drawing_submitted=true
     }
   };
 
@@ -302,7 +341,7 @@ const GamePage: React.FC = () => {
           <WordGrid /> 
         </div>
         <DrawingCanvas 
-          strokes={strokes} 
+          strokes={myRole === 'drawer' ? [...strokes, ...localStrokes] : strokes} 
           onDrawEnd={handleLocalStrokeEnd} 
           width={800} 
           height={600}
