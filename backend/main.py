@@ -11,34 +11,58 @@ from pydantic import BaseModel, ValidationError, ConfigDict, Field
 import json
 from fastapi import status
 from starlette.websockets import WebSocketState
-
-from words import WORD_LIST
+# from words import WORD_LIST # Removed as WORD_LIST is defined comprehensively below
 
 app = FastAPI()
 
-# --- CORS Middleware Configuration --- 
-# This should be placed before any routes or WebSocket endpoints are defined.
+@app.get("/ping")
+async def ping():
+    return {"message": "pong"}
+
+# --- CORS Middleware Configuration ---
 origins = [
-    "http://localhost",         # General localhost
-    "http://localhost:3000",    # Common React dev port
-    "http://localhost:5173",    # Common Vite dev port
-    "http://localhost:61583",   # From console log, likely client ephemeral port but no harm in adding
-    "http://127.0.0.1",       # General loopback
+    "http://localhost",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:61583",
+    "http://127.0.0.1",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:61583",
-    # Add the specific origin your frontend is served from if different
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True, # Allow cookies and authorization headers
-    allow_methods=["*"],    # Allow all HTTP methods
-    allow_headers=["*"],    # Allow all headers
+    allow_origins=["**"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# --- Word lists for memorable game IDs ---
+# More extensive word list with common Codenames words
+WORD_LIST = [
+    "apple", "banana", "cherry", "date", "elderberry", "fig", "grape", "honeydew", "kiwi", "lemon",
+    "mango", "nectarine", "orange", "papaya", "quince", "raspberry", "strawberry", "tangerine",
+    "watermelon", "blueberry", "blackberry", "plum", "peach", "pear", "apricot", "avocado",
+    "lime", "coconut", "guava", "dragonfruit", "book", "car", "dog", "elephant", "fire", "ghost",
+    "house", "ice", "jungle", "king", "lion", "moon", "night", "ocean", "pirate", "queen",
+    "robot", "star", "tree", "umbrella", "vampire", "witch", "xylophone", "yacht", "zebra",
+    "airplane", "basketball", "computer", "dinosaur", "engine", "football", "guitar", "hospital",
+    "igloo", "jacket", "kangaroo", "lighthouse", "mountain", "newspaper", "octopus", "penguin",
+    "quarter", "rainbow", "satellite", "telescope", "unicorn", "volcano", "window", "xray", "yoga", "zipper"
+]
+
+try:
+    with open("codenames_words.txt", "r") as f:
+        additional_words = [line.strip() for line in f if line.strip()]
+        WORD_LIST.extend(additional_words)
+        print(f"Loaded {len(additional_words)} additional words from codenames_words.txt")
+except FileNotFoundError:
+    print("codenames_words.txt not found. Using the built-in word list.")
+
+WORD_LIST = list(set(WORD_LIST))
+print(f"Total word list size: {len(WORD_LIST)} words")
+
 ADJECTIVES = [
     "Quick", "Lazy", "Sleepy", "Noisy", "Hungry", "Funny", "Silly", "Clever",
     "Brave", "Calm", "Eager", "Jolly", "Kind", "Proud", "Witty", "Zany"
@@ -48,139 +72,115 @@ NOUNS = [
     "Panda", "Koala", "Lemur", "Otter", "Squid", "Crab", "Shark", "Owl"
 ]
 
-# --- Pydantic Models --- 
 class Stroke(BaseModel):
     id: str = Field(default_factory=lambda: f"stroke-{uuid.uuid4()}")
     points: list[list[float]]
     color: str = "#000000"
     width: int = 2
-    tool: str = "pen" # 'pen' or 'eraser'
+    tool: str = "pen"
 
 class GameState(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
     game_id: str
-    clients: Dict[str, WebSocket] = {}
-    strokes: List[Stroke] = []
-    # Turn and game flow management
+    clients: Dict[str, WebSocket] = Field(default_factory=dict)
+    strokes: List[Stroke] = Field(default_factory=list)
+    current_turn_drawing_strokes: List[Stroke] = Field(default_factory=list)
+    grid_words: List[str] = Field(default_factory=list)
+    key_card_a: List[str] = Field(default_factory=list)
+    key_card_b: List[str] = Field(default_factory=list)
+    player_a_id: Optional[str] = None
+    player_b_id: Optional[str] = None
+    revealed_cards: List[str] = Field(default_factory=list)
     current_drawing_player_id: Optional[str] = None
     current_guessing_player_id: Optional[str] = None
-    drawing_phase_active: bool = True # Starts true, waiting for first drawer
+    drawing_phase_active: bool = True
     drawing_submitted: bool = False
-    turn_number: int = 1 # Game starts with turn 1
+    guessing_active: bool = False
+    correct_guesses_this_turn: int = 0
+    turn_number: int = 1
+    game_over: bool = False
+    winner: Optional[str] = None
 
 class WebSocketMessagePayload(BaseModel):
-    clientId: str | None = None
-    # Add other potential payload fields here, or use a Union of specific payload types
-    # For STROKE, the payload will be a Stroke model, handled separately.
+    clientId: Optional[str] = None
 
 class WebSocketMessage(BaseModel):
     type: str
-    payload: Any # Stroke | WebSocketMessagePayload | dict | str - flexible for now
-    gameId: str | None = None # gameId from client, esp. for JOIN
+    payload: Any
+    gameId: Optional[str] = None
 
-# --- In-memory storage --- 
 active_games: Dict[str, GameState] = {}
-# game_id -> client_id -> WebSocket connection
-game_room_connections: Dict[str, Dict[str, WebSocket]] = {}
 
-# --- Game ID Generation ---
 def generate_memorable_game_id(max_attempts=10) -> str:
     for _ in range(max_attempts):
         adj = random.choice(ADJECTIVES)
         noun = random.choice(NOUNS)
-        num = random.randint(1, 999) # Adding a number significantly reduces collisions
-        game_id = f"{adj}{noun}{num}".lower() # Convert to lowercase
+        num = random.randint(1, 999)
+        game_id = f"{adj}{noun}{num}".lower()
         if game_id not in active_games:
             return game_id
-    # Fallback to UUID if too many collisions (highly unlikely with number suffix and decent list sizes)
     print("Warning: Max attempts reached for memorable game ID generation. Falling back to UUID.")
-    return str(uuid.uuid4()).lower() # Convert to lowercase
-
-# --- Connection Manager Helpers --- 
-async def connect_client(game_id: str, client_id: str, websocket: WebSocket):
-    if game_id not in game_room_connections:
-        game_room_connections[game_id] = {}
-    game_room_connections[game_id][client_id] = websocket
-    print(f"Client {client_id} connected to game {game_id}")
-
-async def disconnect_client(game_id: str, client_id: str):
-    if game_id in game_room_connections and client_id in game_room_connections[game_id]:
-        del game_room_connections[game_id][client_id]
-        print(f"Client {client_id} disconnected from game {game_id}.")
-        if not game_room_connections[game_id]: # if room is empty
-            del game_room_connections[game_id]
-            # print(f"Game room {game_id} is now empty.")
-    # Game state client removal is handled in handle_disconnect within websocket_endpoint
-
-async def broadcast_to_room(game_id: str, message_data: dict, sender_client_id: str | None):
-    if game_id in active_games: # Check if game still active
-        game = active_games[game_id]
-        for client_id, websocket_conn in game.clients.items():
-            if client_id != sender_client_id:  # Don't send back to original sender
-                try:
-                    if websocket_conn.client_state == WebSocketState.CONNECTED:
-                        await websocket_conn.send_text(json.dumps(message_data))
-                except Exception as e:
-                    print(f"Error broadcasting to client {client_id} in game {game_id}: {e}")
-    else:
-        print(f"Skipping broadcast to non-existent game {game_id}")
+    return str(uuid.uuid4()).lower()
 
 async def broadcast_game_state(game_id: str):
-    if game_id in active_games:
-        game = active_games[game_id]
-        
-        base_game_state_payload = {
-            "game_id": game.game_id,
-            # strokes will be conditional
-            "current_drawing_player_id": game.current_drawing_player_id,
-            "current_guessing_player_id": game.current_guessing_player_id,
-            "drawing_phase_active": game.drawing_phase_active,
-            "drawing_submitted": game.drawing_submitted,
-            "turn_number": game.turn_number,
-            "connected_client_ids": list(game.clients.keys())
-        }
+    if game_id not in active_games:
+        print(f"Error: Attempted to broadcast to non-existent game room {game_id}")
+        return
 
-        for client_id, websocket_conn in game.clients.items():
-            client_specific_payload = base_game_state_payload.copy()
-            
-            # Conditional strokes:
-            if client_id == game.current_drawing_player_id or game.drawing_submitted:
-                client_specific_payload["strokes"] = [s.model_dump() for s in game.strokes]
-            else: # Guessers/spectators before submission see no strokes
-                client_specific_payload["strokes"] = [] 
-            
-            message_to_send = {
-                "type": "GAME_STATE_UPDATE",
-                "payload": client_specific_payload,
-                "gameId": game_id 
-            }
-            try:
-                if websocket_conn.client_state == WebSocketState.CONNECTED:
-                    await websocket_conn.send_text(json.dumps(message_to_send))
-            except Exception as e:
-                print(f"Error broadcasting game state to client {client_id} in game {game_id}: {e}")
-        
-        print(f"Broadcasted game state for game {game_id}. Drawing submitted: {game.drawing_submitted}")
-    else:
-        print(f"Attempted to broadcast state for non-existent game: {game_id}")
+    game_state = active_games[game_id]
+    connected_client_ids = list(game_state.clients.keys())
 
-# Ensure the frontend build directory exists for static file serving
+    base_payload = {
+        "game_id": game_state.game_id,
+        "strokes": [stroke.model_dump() for stroke in game_state.strokes],
+        "grid_words": game_state.grid_words,
+        "revealed_cards": game_state.revealed_cards,
+        "current_drawing_player_id": game_state.current_drawing_player_id,
+        "current_guessing_player_id": game_state.current_guessing_player_id,
+        "drawing_phase_active": game_state.drawing_phase_active,
+        "drawing_submitted": game_state.drawing_submitted,
+        "guessing_active": game_state.guessing_active,
+        "correct_guesses_this_turn": game_state.correct_guesses_this_turn,
+        "turn_number": game_state.turn_number,
+        "game_over": game_state.game_over,
+        "winner": game_state.winner,
+        "connected_client_ids": connected_client_ids,
+        # Send current turn drawing strokes only if drawing isn't submitted yet
+        "current_turn_drawing_strokes": [s.model_dump() for s in game_state.current_turn_drawing_strokes] if not game_state.drawing_submitted else []
+    }
+
+    for client_id, websocket in game_state.clients.items():
+        client_payload = base_payload.copy()
+        client_is_player_a = game_state.player_a_id is not None and client_id == game_state.player_a_id
+        client_is_player_b = game_state.player_b_id is not None and client_id == game_state.player_b_id
+
+        if client_is_player_a:
+            client_payload["key_card"] = game_state.key_card_a
+        elif client_is_player_b:
+            client_payload["key_card"] = game_state.key_card_b
+        else:
+            client_payload["key_card"] = []
+
+        message = {"type": "GAME_STATE", "payload": client_payload}
+        try:
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.send_text(json.dumps(message))
+        except Exception as e:
+            print(f"Error broadcasting game state to client {client_id} in game {game_id}: {e}")
+
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 STATIC_ASSETS_DIR = os.path.join(FRONTEND_DIR, "assets")
 
-# Mount static files (e.g., CSS, JS)
 if os.path.exists(STATIC_ASSETS_DIR):
     app.mount("/assets", StaticFiles(directory=STATIC_ASSETS_DIR), name="static_assets")
 else:
-    print(f"Warning: Static assets directory not found at {STATIC_ASSETS_DIR}. Frontend might not load correctly until built.")
+    print(f"Warning: Static assets directory not found at {STATIC_ASSETS_DIR}.")
 
 @app.websocket("/ws/{game_id_path}/{client_id_path}")
 async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_path: str):
-    established_game_id: str | None = None
-    established_client_id: str | None = None
+    established_game_id: Optional[str] = None
+    established_client_id: Optional[str] = None
 
-    # 1. Validate game_id_path and find the actual case-sensitive game_id
     actual_game_id_found = None
     for existing_game_id_key in active_games.keys():
         if existing_game_id_key.lower() == game_id_path.lower():
@@ -188,339 +188,470 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
             break
 
     if not actual_game_id_found:
-        print(f"WebSocket connection attempt to non-existent or case-mismatched game: '{game_id_path}'. Closing.")
-        # We can't send a message before accept, so we just close.
-        # The client will see this as a failed connection.
-        # For more specific error codes, FastAPI/Starlette might need specific handling
-        # or we'd accept then immediately send error and close.
-        # For now, direct close is simplest if game path is invalid.
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION) 
+        print(f"WebSocket conn attempt to non-existent game: '{game_id_path}'. Closing.")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    # 2. If game found, establish game_id and client_id for this connection
     established_game_id = actual_game_id_found
     established_client_id = client_id_path
 
-    # 3. Accept the connection
     await websocket.accept()
-    print(f"WebSocket connection accepted for game: {established_game_id}, client: {established_client_id}")
+    print(f"WebSocket conn accepted for game: {established_game_id}, client: {established_client_id}")
 
-    # Ensure game still exists before proceeding (guard against rare race conditions)
     if established_game_id not in active_games:
-        print(f"Game {established_game_id} was removed before client {established_client_id} could be fully added. Closing connection.")
-        await websocket.close(code=status.WS_1011_INTERNAL_ERROR) # Internal server error
+        print(f"Game {established_game_id} removed before client {established_client_id} fully added. Closing.")
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         return
 
-    # Add client to the game state
-    # Ensure the clients dict is initialized for the game_id if it's a new game (should be by create_game)
-    if not hasattr(active_games[established_game_id], 'clients') or active_games[established_game_id].clients is None:
-        active_games[established_game_id].clients = {}
-        print(f"Warning: Clients dictionary for game {established_game_id} was not initialized. Initialized now.")
-        
-    active_games[established_game_id].clients[established_client_id] = websocket
+    current_game = active_games[established_game_id]
+    current_game.clients[established_client_id] = websocket
 
     try:
-        # Send existing strokes and game state to the newly connected client
-        if established_game_id in active_games: 
-            game_for_initial_state = active_games[established_game_id]
-            
-            # Determine strokes to send for INITIAL_STROKES event
-            initial_strokes_for_client = []
-            if established_client_id == game_for_initial_state.current_drawing_player_id or game_for_initial_state.drawing_submitted:
-                initial_strokes_for_client = [stroke.model_dump() for stroke in game_for_initial_state.strokes]
-            
-            await websocket.send_text(json.dumps({
-                "type": "INITIAL_STROKES", 
-                "payload": initial_strokes_for_client, # Send potentially filtered strokes
-                "gameId": established_game_id
-            }))
-            print(f"Sent {len(initial_strokes_for_client)} initial strokes to client {established_client_id} for game {established_game_id} (drawing_submitted: {game_for_initial_state.drawing_submitted})")
+        initial_payload_data = {
+            "strokes": [s.model_dump() for s in current_game.strokes],
+            "current_turn_drawing_strokes": [] # Initially empty, GAME_STATE will provide current if any
+        }
+        # If this client is the current drawer and drawing is not submitted, send their live strokes
+        if not current_game.drawing_submitted and established_client_id == current_game.current_drawing_player_id:
+            initial_payload_data["current_turn_drawing_strokes"] = [s.model_dump() for s in current_game.current_turn_drawing_strokes]
+
+        await websocket.send_text(json.dumps({
+            "type": "INITIAL_GAME_DATA",
+            "payload": initial_payload_data,
+            "gameId": established_game_id
+        }))
+        print(f"Sent INITIAL_GAME_DATA to client {established_client_id} for game {established_game_id}")
+
+        player_assignment_changed = False
+        if current_game.player_a_id is None:
+            current_game.player_a_id = established_client_id
+            if current_game.current_drawing_player_id is None:
+                current_game.current_drawing_player_id = established_client_id
+            print(f"Player A ({established_client_id}) registered. Is now current drawer.")
+            player_assignment_changed = True
+        elif current_game.player_b_id is None and current_game.player_a_id != established_client_id:
+            current_game.player_b_id = established_client_id
+            if current_game.current_guessing_player_id is None:
+                current_game.current_guessing_player_id = established_client_id
+            print(f"Player B ({established_client_id}) registered. Is now current guesser.")
+            player_assignment_changed = True
+        elif current_game.player_a_id == established_client_id or current_game.player_b_id == established_client_id:
+            print(f"Player {established_client_id} reconnected.")
         else:
-            print(f"Game {established_game_id} was removed before initial strokes could be sent to {established_client_id}.")
+            print(f"INFO: Client {established_client_id} connected as an observer for game {established_game_id}.")
 
-        # Assign roles and broadcast game state (broadcast_game_state will handle conditional strokes)
-        if established_game_id in active_games:
-            current_game_state = active_games[established_game_id]
-            player_role_changed = False
-            if current_game_state.current_drawing_player_id is None:
-                current_game_state.current_drawing_player_id = established_client_id
-                print(f"Client {established_client_id} assigned as DRAWING player for game {established_game_id}.")
-                player_role_changed = True
-            elif current_game_state.current_guessing_player_id is None and established_client_id != current_game_state.current_drawing_player_id:
-                current_game_state.current_guessing_player_id = established_client_id
-                print(f"Client {established_client_id} assigned as GUESSING player for game {established_game_id}.")
-                player_role_changed = True
-            
-            if player_role_changed:
-                await broadcast_game_state(established_game_id)
-            else:
-                # If no roles changed (e.g., a third player joins, or a player reconnects),
-                # still send them the current game state individually so they are up to speed.
-                # The broadcast_game_state would also cover this, but this is more direct for the new client.
-                # However, for simplicity and ensuring consistency with current_drawing_player logic, 
-                # we'll broadcast the full state or a specific 'new_stroke' event.
-                # For now, new connections get INITIAL_STROKES. If their connection triggers a role change, all get GAME_STATE_UPDATE.
-                # If no role change, this new client might not have the full game state beyond strokes.
-                # Let's ensure new client always gets full state after initial strokes, even if no roles changed.
-                # Simplest: always call broadcast_game_state after a client connects and initial strokes are sent.
-                # The `if player_role_changed` was an optimization, but clarity and correctness are better here.
-                # Let's send the full game state to this specific client if roles didn't change, or broadcast if they did.
-                # Decision: Always broadcast after new client setup. This simplifies logic.
-                # The previous thought about sending only to new client if no role change is more complex to maintain.
-                await broadcast_game_state(established_game_id)
+        await broadcast_game_state(established_game_id)
+        if player_assignment_changed:
+            print(f"Game state after role assignment for {established_client_id}: {current_game.model_dump(exclude={'clients'})}")
 
-    except WebSocketDisconnect:
-        print(f"Client {established_client_id} disconnected before or during initial strokes/state sending for game {established_game_id}.")
-    except Exception as e_initial_send:
-        print(f"Error sending initial strokes to client {established_client_id} in game {established_game_id}: {e_initial_send}")
-        # Attempt to close gracefully if possible, then allow finally to clean up.
-        try:
-            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
-        except Exception:
-            pass # Ignore errors on close if already disconnected
-        # Allow finally block to handle cleanup by not re-raising or letting it flow
-        pass # The connection is likely dead or problematic, proceed to finally
-
-    try:
         while True:
-            data = await websocket.receive_text()
-            data_json = json.loads(data)
-            message_data = data_json
-            message_type = message_data.get("type")
-            
-            if not established_game_id or not established_client_id: # Should not happen if logic above is correct
-                print("Error: established_game_id or established_client_id not set in main loop.")
-                await websocket.send_text(json.dumps({"type": "ERROR", "payload": "Server configuration error."}))
-                break # Exit loop
+            message_text = "" # Initialize for use in error messages
+            message_data = {} # Initialize for use in error messages
+            try:
+                message_text = await websocket.receive_text()
+                message_data = json.loads(message_text)
+                message_type = message_data.get("type")
+                payload = message_data.get("payload", {})
+                # payload_client_id = payload.get("clientId") # Not strictly needed if we use established_client_id
 
-            current_game_state = active_games.get(established_game_id)
-            if not current_game_state:
-                print(f"Error: Game {established_game_id} not found in active_games during message handling.")
-                await websocket.send_text(json.dumps({"type": "ERROR", "payload": "Game not found."}))
-                break # Exit loop
+                current_game = active_games.get(established_game_id)
+                if not current_game:
+                    print(f"WARN: Game {established_game_id} disappeared during msg loop for {established_client_id}. Closing.")
+                    if websocket.client_state == WebSocketState.CONNECTED:
+                        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+                    break
 
-            if message_type == "DRAW_STROKE":
-                print(f"DEBUG: Received DRAW_STROKE. Full message_data: {message_data}")
-                # stroke_payload is already a dict due to json.loads earlier
-                stroke_payload_dict = message_data.get('payload') 
-                game_id_for_stroke = message_data.get('gameId') # gameId from message payload
-                client_id_for_stroke = message_data.get('clientId') # clientId from message payload
+                actor_client_id = established_client_id
 
-                if not isinstance(stroke_payload_dict, dict):
-                    print(f"ERROR: Stroke payload is not a dictionary. Payload: {stroke_payload_dict}")
-                    await websocket.send_json({"type": "ERROR", "payload": "Invalid stroke format"})
-                    continue
+                if message_type == "NEW_STROKE":
+                    stroke_input_data = payload.get("stroke")
+                    if not isinstance(stroke_input_data, dict):
+                        print(f"ERROR: NEW_STROKE payload.stroke is not a dictionary from {actor_client_id}: {stroke_input_data}")
+                        continue
 
-                # Validate that the client sending the stroke is the current drawing player
-                current_drawing_player_id_for_game = active_games[established_game_id].current_drawing_player_id
-                if client_id_for_stroke != current_drawing_player_id_for_game:
-                    print(f"ERROR: Client {client_id_for_stroke} is not the current drawing player ({current_drawing_player_id_for_game}) for game {established_game_id}. Ignoring stroke.")
-                    # Optionally send an error message to the client
-                    # await websocket.send_json({"type": "ERROR", "payload": "Not your turn to draw"})
-                    continue
-                
-                # Validate that drawing_phase_active is True
-                if not active_games[established_game_id].drawing_phase_active:
-                    print(f"ERROR: Drawing phase is not active for game {established_game_id}. Ignoring stroke from {client_id_for_stroke}.")
-                    # await websocket.send_json({"type": "ERROR", "payload": "Drawing phase is over"})
-                    continue
+                    if actor_client_id == current_game.current_drawing_player_id and \
+                       current_game.drawing_phase_active and not current_game.drawing_submitted:
+                        
+                        processed_stroke_data = stroke_input_data.copy()
 
-                # Transform points from list of dicts [{x:v, y:v}] to list of lists [[v,v]] for Pydantic validation
-                if 'points' in stroke_payload_dict and isinstance(stroke_payload_dict['points'], list):
-                    transformed_points = []
-                    all_points_valid = True
-                    for point_obj in stroke_payload_dict['points']:
-                        if isinstance(point_obj, dict) and 'x' in point_obj and 'y' in point_obj:
-                            try:
-                                transformed_points.append([float(point_obj['x']), float(point_obj['y'])])
-                            except (TypeError, ValueError):
-                                all_points_valid = False
-                                print(f"ERROR: Non-numeric x/y in point object: {point_obj}")
-                                break
-                        elif isinstance(point_obj, list) and len(point_obj) == 2:
-                            try:
-                                transformed_points.append([float(point_obj[0]), float(point_obj[1])]) # If somehow already list of lists
-                            except (TypeError, ValueError):
-                                all_points_valid = False
-                                print(f"ERROR: Non-numeric values in point list: {point_obj}")
-                                break
+                        if 'points' in processed_stroke_data and isinstance(processed_stroke_data['points'], list):
+                            raw_points = processed_stroke_data['points']
+                            transformed_points = []
+                            valid_points_format = True
+                            for p_obj in raw_points:
+                                if isinstance(p_obj, dict) and 'x' in p_obj and 'y' in p_obj:
+                                    try: transformed_points.append([float(p_obj['x']), float(p_obj['y'])])
+                                    except (TypeError, ValueError): valid_points_format = False; break
+                                elif isinstance(p_obj, list) and len(p_obj) == 2:
+                                    try: transformed_points.append([float(p_obj[0]), float(p_obj[1])])
+                                    except (TypeError, ValueError): valid_points_format = False; break
+                                else: valid_points_format = False; break
+                            
+                            if valid_points_format:
+                                processed_stroke_data['points'] = transformed_points
+                            else:
+                                print(f"ERROR: Invalid point data in NEW_STROKE from {actor_client_id}. Points: {raw_points}")
+                                continue
+                        
+                        try:
+                            new_stroke = Stroke(**processed_stroke_data)
+                            current_game.current_turn_drawing_strokes.append(new_stroke)
+                            # To give drawing player immediate feedback of their own strokes (without full broadcast yet):
+                            if websocket.client_state == WebSocketState.CONNECTED:
+                                await websocket.send_text(json.dumps({
+                                    "type": "CURRENT_STROKES_UPDATE", # Client listens for this to update its own canvas
+                                    "payload": {"strokes": [s.model_dump() for s in current_game.current_turn_drawing_strokes]}
+                                }))
+                        except ValidationError as e:
+                            print(f"ERROR: Stroke validation error for NEW_STROKE from {actor_client_id}: {e}. Processed data: {processed_stroke_data}")
+                    else:
+                        print(f"INFO: NEW_STROKE from {actor_client_id} ignored. Conditions not met.")
+
+                elif message_type == "CLEAR_CANVAS":
+                    if actor_client_id == current_game.current_drawing_player_id and \
+                       current_game.drawing_phase_active and not current_game.drawing_submitted:
+                        current_game.current_turn_drawing_strokes = []
+                        print(f"INFO: Canvas cleared by drawer {actor_client_id} for game {established_game_id}.")
+                        # Inform the drawer their canvas was cleared
+                        if websocket.client_state == WebSocketState.CONNECTED:
+                                await websocket.send_text(json.dumps({
+                                    "type": "CURRENT_STROKES_UPDATE",
+                                    "payload": {"strokes": []}
+                                }))
+                    else:
+                        print(f"WARN: CLEAR_CANVAS from {actor_client_id} ignored. Conditions not met.")
+
+                elif message_type == "SUBMIT_DRAWING":
+                    if actor_client_id == current_game.current_drawing_player_id and \
+                       current_game.drawing_phase_active and not current_game.drawing_submitted:
+                        
+                        submitted_strokes_payload = payload.get("strokes")
+                        processed_payload_strokes = False
+
+                        if isinstance(submitted_strokes_payload, list):
+                            if len(submitted_strokes_payload) > 0:
+                                print(f"INFO: Received {len(submitted_strokes_payload)} strokes in SUBMIT_DRAWING payload from {actor_client_id}.")
+                                validated_submitted_strokes = []
+                                for stroke_data in submitted_strokes_payload:
+                                    if not isinstance(stroke_data, dict):
+                                        print(f"ERROR: SUBMIT_DRAWING stroke_data is not a dictionary: {stroke_data} from {actor_client_id}")
+                                        continue
+
+                                    processed_stroke_data = stroke_data.copy()
+                                    
+                                    # Points transformation: frontend sends points as nested arrays e.g. [[x1,y1],[x2,y2]]
+                                    if 'points' in processed_stroke_data and isinstance(processed_stroke_data['points'], list):
+                                        raw_points = processed_stroke_data['points']
+                                        transformed_points = []
+                                        valid_points_format = True
+                                        for p_pair in raw_points: # Each p_pair should be [x, y]
+                                            if isinstance(p_pair, list) and len(p_pair) == 2:
+                                                try:
+                                                    transformed_points.append([float(p_pair[0]), float(p_pair[1])])
+                                                except (TypeError, ValueError):
+                                                    valid_points_format = False; break
+                                            else: # Malformed point pair
+                                                valid_points_format = False; break
+                                        
+                                        if valid_points_format:
+                                            processed_stroke_data['points'] = transformed_points
+                                        else:
+                                            print(f"ERROR: Invalid point data format in SUBMIT_DRAWING from {actor_client_id}. Points: {raw_points}")
+                                            continue # Skip this stroke
+                                    else:
+                                        print(f"ERROR: Missing or invalid 'points' list in SUBMIT_DRAWING stroke_data: {stroke_data} from {actor_client_id}")
+                                        continue # Skip this stroke
+
+                                    try:
+                                        stroke_instance = Stroke(**processed_stroke_data)
+                                        validated_submitted_strokes.append(stroke_instance)
+                                    except ValidationError as e:
+                                        print(f"ERROR: Stroke validation error for SUBMIT_DRAWING from {actor_client_id}: {e}. Data: {processed_stroke_data}")
+                                        continue # Skip this stroke
+                                
+                                if validated_submitted_strokes: # If any strokes were successfully validated from non-empty payload
+                                    current_game.current_turn_drawing_strokes = validated_submitted_strokes 
+                                    print(f"INFO: Replaced current_turn_drawing_strokes with {len(validated_submitted_strokes)} validated strokes from SUBMIT_DRAWING payload.")
+                                    processed_payload_strokes = True
+                                else:
+                                    print(f"WARN: No valid strokes processed from SUBMIT_DRAWING payload from {actor_client_id}. Retaining existing current_turn_drawing_strokes if any.")
+                                    # Fallback: if payload had strokes but all failed validation, current_turn_drawing_strokes remains as is (from NEW_STROKEs)
+                            else: # Empty list of strokes sent in payload
+                                 print(f"INFO: SUBMIT_DRAWING payload contained an empty list of strokes from {actor_client_id}. Clearing current_turn_drawing_strokes.")
+                                 current_game.current_turn_drawing_strokes = []
+                                 processed_payload_strokes = True
                         else:
-                            all_points_valid = False
-                            print(f"ERROR: Malformed point in stroke_payload_dict: {point_obj}")
-                            break
-                    
-                    if not all_points_valid:
-                        await websocket.send_json({"type": "ERROR", "payload": "Invalid point data in stroke"})
-                        continue # Skip this stroke
-                    stroke_payload_dict['points'] = transformed_points
+                            print(f"WARN: No 'strokes' list, or non-list 'strokes', found in SUBMIT_DRAWING payload from {actor_client_id}. Relying on prior NEW_STROKE data. Payload: {payload}")
+                            # Fallback: if 'strokes' key is missing or not a list, current_turn_drawing_strokes remains as is.
+
+                        # Now, finalize the drawing with the (potentially updated or cleared) current_turn_drawing_strokes
+                        current_game.strokes.extend(current_game.current_turn_drawing_strokes)
+                        
+                        current_game.drawing_phase_active = False
+                        current_game.drawing_submitted = True
+                        current_game.guessing_active = True
+                        print(f"INFO: Drawing submitted by {actor_client_id} for game {established_game_id}. Guessing now active.")
+                    else:
+                        print(f"WARN: SUBMIT_DRAWING from {actor_client_id} ignored. Conditions not met.")
+
+                elif message_type == "GUESS_WORD":
+                    word_index_str = payload.get("wordIndex")
+                    if word_index_str is None:
+                        print(f"ERROR: GUESS_WORD from {actor_client_id} missing 'wordIndex'.")
+                        continue
+                    try: word_index = int(word_index_str)
+                    except ValueError:
+                        print(f"ERROR: GUESS_WORD 'wordIndex' ('{word_index_str}') not an int from {actor_client_id}.")
+                        continue
+
+                    if not (actor_client_id == current_game.current_guessing_player_id and current_game.guessing_active):
+                        print(f"WARN: GUESS_WORD from {actor_client_id} ignored. Conditions not met.")
+                        continue
+                    if not (0 <= word_index < len(current_game.grid_words)):
+                        print(f"ERROR: GUESS_WORD invalid word_index {word_index} from {actor_client_id}.")
+                        continue
+                    if current_game.revealed_cards[word_index] != "":
+                        print(f"INFO: GUESS_WORD card at index {word_index} already revealed by {actor_client_id}.")
+                        continue
+
+                    drawer_key_card = current_game.key_card_a if current_game.current_drawing_player_id == current_game.player_a_id else current_game.key_card_b
+                    if not drawer_key_card: # Should not happen if roles are set
+                        print(f"CRITICAL_ERROR: Drawer's key card not found for GUESS_WORD. Drawer: {current_game.current_drawing_player_id}")
+                        true_card_type = 'neutral' 
+                    else:
+                        true_card_type = drawer_key_card[word_index]
+
+                    current_game.revealed_cards[word_index] = true_card_type
+                    print(f"INFO: Game {established_game_id}: Player {actor_client_id} guessed '{current_game.grid_words[word_index]}' (idx {word_index}). True type: {true_card_type}")
+
+                    game_ended_this_guess = False
+                    turn_ended_this_guess = False
+
+                    if true_card_type == 'green':
+                        current_game.correct_guesses_this_turn += 1
+                        player_a_green_indices = {i for i, t in enumerate(current_game.key_card_a) if t == 'green'}
+                        player_b_green_indices = {i for i, t in enumerate(current_game.key_card_b) if t == 'green'}
+                        all_target_green_indices = player_a_green_indices.union(player_b_green_indices)
+                        revealed_target_greens = sum(1 for i in all_target_green_indices if current_game.revealed_cards[i] == 'green')
+                        
+                        print(f"INFO: Revealed target green cards: {revealed_target_greens} / {len(all_target_green_indices)}")
+                        if revealed_target_greens >= 15:
+                             current_game.game_over = True
+                             current_game.winner = "Players Win! (15 green words identified)"
+                             game_ended_this_guess = True
+                             print(f"GAME_OVER: Players win in game {established_game_id}!")
+
+                    elif true_card_type == 'neutral':
+                        print(f"INFO: Neutral card hit by {actor_client_id}. Turn ends.")
+                        turn_ended_this_guess = True
+                    elif true_card_type == 'assassin':
+                        print(f"GAME_OVER: Assassin card hit by {actor_client_id}! Game Over for game {established_game_id}.")
+                        current_game.game_over = True
+                        current_game.winner = "Players Lose! (Assassin revealed)"
+                        game_ended_this_guess = True
+                        turn_ended_this_guess = True # Assassin always ends turn
+
+                    if turn_ended_this_guess and not game_ended_this_guess:
+                        current_game.guessing_active = False
+                        current_game.drawing_phase_active = True
+                        current_game.drawing_submitted = False # New drawing phase
+                        current_game.correct_guesses_this_turn = 0
+                        current_game.current_turn_drawing_strokes = [] # Clear for new drawer
+                        
+                        prev_drawer = current_game.current_drawing_player_id
+                        current_game.current_drawing_player_id = current_game.current_guessing_player_id
+                        current_game.current_guessing_player_id = prev_drawer
+                        current_game.turn_number += 1
+                        print(f"INFO: Roles switched. New Drawer: {current_game.current_drawing_player_id}, New Guesser: {current_game.current_guessing_player_id}. Turn: {current_game.turn_number}")
+                    elif game_ended_this_guess:
+                        current_game.guessing_active = False
+                        current_game.drawing_phase_active = False
+                        print(f"INFO: Game {established_game_id} ended. Outcome: {current_game.winner}")
                 else:
-                    print(f"ERROR: 'points' field missing or invalid in stroke_payload_dict: {stroke_payload_dict.get('points')}")
-                    await websocket.send_json({"type": "ERROR", "payload": "'points' field missing or invalid"})
-                    continue # Skip this stroke
-
-                # Add a unique ID to the stroke before validation and storage
-                stroke_id = f"stroke-{uuid.uuid4()}"
-                stroke_payload_dict_with_id = {**stroke_payload_dict, "id": stroke_id}
-                print(f"DEBUG: Extracted stroke_payload_dict for Stroke validation: {stroke_payload_dict}")
-
-
-                try:
-                    validated_stroke = Stroke(**stroke_payload_dict_with_id)
-                except ValidationError as e:
-                    print(f"ERROR: Stroke validation failed for client {client_id_for_stroke} in game {game_id_for_stroke}. Error: {e.errors()}")
-                    await websocket.send_json({"type": "ERROR", "payload": f"Invalid stroke data: {e.errors()}"})
-                    continue
-
-                if game_id_for_stroke not in active_games:
-                    print(f"ERROR: DRAW_STROKE for non-existent game '{game_id_for_stroke}'. Stroke: {stroke_payload_dict}")
-                    # This case should ideally be caught by the established_game_id check earlier
-                    # but if payload_game_id could differ and bypass, this is a safeguard.
-                    continue
-                
-                active_games[game_id_for_stroke].strokes.append(validated_stroke)
-                print(f"Stroke from {client_id_for_stroke} successfully added to game {game_id_for_stroke}. Stroke ID: {stroke_id}")
-                
-                # DO NOT BROADCAST INDIVIDUAL STROKES TO ALL PLAYERS HERE
-                # The drawing player sees their strokes locally.
-                # Guessers will see strokes only after SUBMIT_DRAWING via GAME_STATE_UPDATE.
-                # print(f"Stroke drawn by {established_client_id} and added to game {established_game_id}. Not broadcasting immediately.")
-
-            elif message_type == "CLEAR_CANVAS":
-                # Robustly get clientId for CLEAR_CANVAS
-                msg_payload = message_data.get("payload", {})  # Default to empty dict if payload is missing
-                client_id_for_clear = msg_payload.get("clientId")
-
-                if not client_id_for_clear:
-                    client_id_for_clear = established_client_id  # Fallback to client_id from connection path
-                    print(f"DEBUG: CLEAR_CANVAS using clientId from connection path: {client_id_for_clear} for game {established_game_id}")
-                else:
-                    print(f"DEBUG: CLEAR_CANVAS using clientId from payload: {client_id_for_clear} for game {established_game_id}")
+                    print(f"WARN: Unknown message type '{message_type}' from {actor_client_id} in game {established_game_id}. Payload: {payload}")
 
                 if established_game_id in active_games:
-                    current_game = active_games[established_game_id]
-                    current_drawing_player_id_for_game = current_game.current_drawing_player_id
+                    await broadcast_game_state(established_game_id)
+                else: # Game might have been removed by another process or due to player disconnect
+                    if websocket.client_state == WebSocketState.CONNECTED:
+                         print(f"WARN: Game {established_game_id} no longer active for broadcast. Closing ws for {actor_client_id}.")
+                         await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+                    break 
 
-                    if client_id_for_clear == current_drawing_player_id_for_game:
-                        if current_game.drawing_phase_active and not current_game.drawing_submitted:
-                            current_game.strokes = []  # Clear the strokes
-                            print(f"INFO: Canvas cleared for game {established_game_id} by client {client_id_for_clear}")
-                            await broadcast_to_room(
-                                established_game_id,
-                                {"type": "CANVAS_CLEARED", "payload": {"clearedBy": client_id_for_clear, "gameId": established_game_id}},
-                                sender_client_id=None 
-                            )
-                            # No need to call broadcast_game_state separately if CANVAS_CLEARED implies strokes are empty
-                            # However, if other parts of game state could change, or if clients solely rely on GAME_STATE_UPDATE for strokes,
-                            # then it might be needed. For now, CANVAS_CLEARED should be sufficient for strokes.
-                            # Let's ensure clients handle CANVAS_CLEARED by emptying their local strokes.
-                        else:
-                            print(f"ERROR: Drawing phase not active or drawing already submitted for game {established_game_id}. Ignoring CLEAR_CANVAS from {client_id_for_clear}.")
-                    else:
-                        print(f"ERROR: Client '{client_id_for_clear}' is not the current drawing player ('{current_drawing_player_id_for_game}') for game {established_game_id}. Ignoring CLEAR_CANVAS.")
-                else:
-                    print(f"ERROR: CLEAR_CANVAS for non-existent game '{established_game_id}'.")
-
-            elif message_type == "SUBMIT_DRAWING":
-                print(f"Received SUBMIT_DRAWING from {established_client_id} in game {established_game_id}")
-                if established_game_id in active_games:
-                    game_state = active_games[established_game_id]
-                    if game_state.current_drawing_player_id == established_client_id and game_state.drawing_phase_active:
-                        game_state.drawing_submitted = True
-                        game_state.drawing_phase_active = False # Drawing phase for this turn ends
-                        print(f"Drawing submitted by {established_client_id} in game {established_game_id}. Drawing phase ended.")
-                        # Notify all clients about the game state change
-                        await broadcast_game_state(established_game_id)
-                    else:
-                        print(f"Unauthorized SUBMIT_DRAWING attempt by {established_client_id} or drawing not active in game {established_game_id}.")
-                        # Optionally send an error message to the client
-                else:
-                    print(f"Game {established_game_id} not found for SUBMIT_DRAWING request from {established_client_id}.")
-
-                # Add more message type handlers here as needed
-                # e.g., for guesses, game start signals, etc.
+            except json.JSONDecodeError:
+                print(f"ERROR: JSONDecodeError from {established_client_id}. Msg: '{message_text}'")
+                continue
+            except KeyError as e:
+                print(f"ERROR: KeyError processing message from {established_client_id}. Error: {e}. Data: {message_data}")
+                continue
+            except WebSocketDisconnect:
+                print(f"INFO: WebSocket disconnected for {established_client_id} (game {established_game_id}) during message processing.")
+                break 
+            except Exception as e:
+                print(f"CRITICAL_ERROR: Unexpected error in message loop for {established_client_id} (game {established_game_id}): {e}")
+                import traceback
+                traceback.print_exc()
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    try:
+                        await websocket.send_text(json.dumps({"type": "ERROR", "payload": {"message": "A critical server error occurred."}}))
+                    except Exception as send_err:
+                        print(f"ERROR: Failed to send critical error msg to client: {send_err}")
+                break # Exit message loop on unhandled errors to trigger cleanup
 
     except WebSocketDisconnect:
-        print(f"Client {established_client_id or 'Unknown'} disconnected from game {established_game_id or 'Unknown'}.")
+        print(f"INFO: Client {established_client_id or 'Unknown'} disconnected (game: {established_game_id or 'Unknown'}). Outer catch.")
     except Exception as e:
-        print(f"Error in WebSocket loop for client {established_client_id or 'Unknown'} in game {established_game_id or 'Unknown'}: {e}")
-        # Attempt to send an error message to the client if the socket is still openable
-        try:
-            await websocket.send_text(json.dumps({"type": "ERROR", "payload": "An unexpected server error occurred."}))
-        except Exception as send_error:
-            print(f"Could not send error to client after exception: {send_error}")
-    finally:
-        print(f"Cleaning up connection for client {established_client_id} in game {established_game_id}")
-        await handle_disconnect(established_game_id, established_client_id, websocket)
-        # Ensure the websocket is still in a connected state before trying to close explicitly
-        # as it might have been closed by the client or an earlier exception.
+        print(f"CRITICAL_ERROR: Unhandled exception in WebSocket handler for {established_client_id} (game: {established_game_id}): {e}")
+        import traceback
+        traceback.print_exc()
         if websocket.client_state == WebSocketState.CONNECTED:
             try:
-                await websocket.close()
-                print(f"WebSocket connection closed for client {established_client_id} in game {established_game_id}")
-            except RuntimeError as e:
-                # This can happen if the connection is already closed by the client side abruptly
-                print(f"RuntimeError when trying to close WebSocket for {established_client_id} in {established_game_id}: {e}. Connection likely already severed.")
-        else:
-            print(f"WebSocket for client {established_client_id} in game {established_game_id} already in state: {websocket.client_state}. No explicit close needed from finally block.")
+                await websocket.send_text(json.dumps({"type": "ERROR", "payload": {"message": "A critical server error occurred."}}))
+                await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+            except Exception as close_err:
+                print(f"ERROR: Failed to send error/close websocket after unhandled exception: {close_err}")
+    finally:
+        print(f"INFO: Cleaning up connection for client {established_client_id} in game {established_game_id}.")
+        if established_game_id and established_client_id and established_game_id in active_games:
+            game = active_games[established_game_id]
+            if established_client_id in game.clients:
+                del game.clients[established_client_id]
+                print(f"Removed {established_client_id} from game.clients list.")
+            
+            cleanup_broadcast_needed = False
+            if game.player_a_id == established_client_id:
+                game.player_a_id = None
+                print(f"Player A ({established_client_id}) slot cleared.")
+                if game.current_drawing_player_id == established_client_id: game.current_drawing_player_id = None
+                if game.current_guessing_player_id == established_client_id: game.current_guessing_player_id = None
+                cleanup_broadcast_needed = True
+            elif game.player_b_id == established_client_id:
+                game.player_b_id = None
+                print(f"Player B ({established_client_id}) slot cleared.")
+                if game.current_drawing_player_id == established_client_id: game.current_drawing_player_id = None
+                if game.current_guessing_player_id == established_client_id: game.current_guessing_player_id = None
+                cleanup_broadcast_needed = True
+            
+            # If a player disconnects and roles become unassigned, try to reassign or handle game state
+            if (game.player_a_id is None or game.player_b_id is None) and not game.game_over:
+                # Logic to pause game or await new player could be added here
+                print(f"INFO: Game {established_game_id} has an open player slot due to disconnect.")
+                if game.current_drawing_player_id is None and game.player_a_id is not None:
+                    game.current_drawing_player_id = game.player_a_id
+                    print(f"INFO: Player A ({game.player_a_id}) becomes drawer by default.")
+                elif game.current_drawing_player_id is None and game.player_b_id is not None:
+                     game.current_drawing_player_id = game.player_b_id
+                     print(f"INFO: Player B ({game.player_b_id}) becomes drawer by default.")
 
-async def handle_disconnect(game_id: str, client_id: str, websocket: WebSocket):
-    if game_id and client_id and game_id in active_games:
-        if client_id in active_games[game_id].clients:
-            del active_games[game_id].clients[client_id]
-            print(f"Removed client {client_id} from game {game_id}.")
-            # if not active_games[game_id].clients: # If game is empty
-            #     print(f"Game {game_id} is now empty. Removing from active_games.")
-            #     del active_games[game_id]
+                if game.current_guessing_player_id is None and game.player_b_id is not None and game.player_b_id != game.current_drawing_player_id :
+                    game.current_guessing_player_id = game.player_b_id
+                    print(f"INFO: Player B ({game.player_b_id}) becomes guesser by default.")
+                elif game.current_guessing_player_id is None and game.player_a_id is not None and game.player_a_id != game.current_drawing_player_id:
+                     game.current_guessing_player_id = game.player_a_id
+                     print(f"INFO: Player A ({game.player_a_id}) becomes guesser by default.")
+                cleanup_broadcast_needed = True
+
+
+            if not game.clients:
+                print(f"Game {established_game_id} has no more clients. Removing game.")
+                del active_games[established_game_id]
+            elif cleanup_broadcast_needed:
+                print(f"A player disconnected or roles potentially changed. Broadcasting updated game state for {established_game_id}.")
+                await broadcast_game_state(established_game_id)
+        
+        if websocket.client_state == WebSocketState.CONNECTED:
+            print(f"WebSocket for {established_client_id} still connected in finally. Closing now.")
+            await websocket.close()
+        print(f"Connection cleanup for {established_client_id} completed.")
 
 @app.get("/api/words", response_model=List[str])
-async def get_random_words():
+async def get_random_words_endpoint(): # Renamed to avoid conflict with function name
     if len(WORD_LIST) < 25:
-        # Fallback or error if the word list is too small
         return random.sample(WORD_LIST, len(WORD_LIST))
     return random.sample(WORD_LIST, 25)
 
-# --- Game Management API Endpoints --- 
+def generate_key_cards() -> tuple[List[str], List[str]]:
+    key_a = ["neutral"] * 25
+    key_b = ["neutral"] * 25
+    
+    available_indices = list(range(25))
+    
+    shared_green_positions = random.sample(available_indices, 3)
+    for pos in shared_green_positions:
+        key_a[pos] = "green"
+        key_b[pos] = "green"
+        available_indices.remove(pos)
+        
+    shared_assassin_position = random.choice(available_indices)
+    key_a[shared_assassin_position] = "assassin"
+    key_b[shared_assassin_position] = "assassin"
+    available_indices.remove(shared_assassin_position)
+    
+    # Player A: 6 more green (total 9)
+    a_unique_green_pos = random.sample(available_indices, 6)
+    for pos in a_unique_green_pos:
+        key_a[pos] = "green"
+        available_indices.remove(pos)
+        
+    # Player B: 6 more green (total 9)
+    b_unique_green_pos = random.sample(available_indices, 6)
+    for pos in b_unique_green_pos:
+        key_b[pos] = "green"
+        available_indices.remove(pos)
+        
+    # Player A: 2 more assassins (total 3)
+    # Indices available now are those not used for shared green, shared assassin, A's unique green, B's unique green
+    a_unique_assassin_pos = random.sample(available_indices, 2)
+    for pos in a_unique_assassin_pos:
+        key_a[pos] = "assassin"
+        available_indices.remove(pos) # Though not strictly needed for B as B picks from remaining
+        
+    # Player B: 2 more assassins (total 3)
+    # available_indices now contains only positions for B's unique assassins and remaining neutrals
+    b_unique_assassin_pos = random.sample(available_indices, 2)
+    for pos in b_unique_assassin_pos:
+        key_b[pos] = "assassin"
+        # available_indices.remove(pos) # Not needed as this is the last sampling step
+
+    # Sanity check counts (optional, for debugging)
+    # print(f"Key A: Green={key_a.count('green')}, Assassin={key_a.count('assassin')}, Neutral={key_a.count('neutral')}")
+    # print(f"Key B: Green={key_b.count('green')}, Assassin={key_b.count('assassin')}, Neutral={key_b.count('neutral')}")
+    return key_a, key_b
+
 @app.post("/api/create_game")
 async def create_game():
-    game_id_candidate = generate_memorable_game_id()
-    # Ensure the generated ID is truly unique (highly likely, but good practice)
-    while game_id_candidate in active_games:
-        game_id_candidate = generate_memorable_game_id()
+    game_id = generate_memorable_game_id()
     
-    game_id = game_id_candidate
+    words_for_game = await get_random_words_endpoint() # Use renamed endpoint function
+    key_card_a, key_card_b = generate_key_cards()
 
     game_state = GameState(
         game_id=game_id,
-        clients={},
-        strokes=[],
-        current_drawing_player_id=None, # To be set when the first player connects
-        current_guessing_player_id=None, # To be set when the second player connects
-        drawing_phase_active=True, # Game starts in a drawing phase (or waiting for drawer)
-        drawing_submitted=False,
-        turn_number=1
+        grid_words=words_for_game,
+        key_card_a=key_card_a,
+        key_card_b=key_card_b,
+        revealed_cards=[""] * 25,
     )
     active_games[game_id] = game_state
-    print(f"Game {game_id} created. Initial state: {game_state.model_dump()}")
+    print(f"Game {game_id} created. Initial state (excluding clients): {game_state.model_dump(exclude={'clients'})}")
     return {"game_id": game_id, "message": f"Game {game_id} created."}
 
-# Serve the index.html for the root path and any other path not caught by other routes
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
     index_file_path = os.path.join(FRONTEND_DIR, "index.html")
-    if not os.path.exists(index_file_path) and full_path != "favicon.ico": # Don't warn for favicon on first load
-        print(f"Warning: index.html not found at {index_file_path}. Ensure the frontend is built and in the correct location.")
-        return {"message": "Frontend not built yet. Run `npm run build` in the frontend directory."}
+    if not os.path.exists(FRONTEND_DIR): # Check parent dir first
+        print(f"Warning: Frontend directory not found at {FRONTEND_DIR}. Ensure frontend is built.")
+        return {"message": "Frontend directory not found. Build the frontend."}
+
+    if not os.path.exists(index_file_path) and full_path != "favicon.ico":
+        print(f"Warning: index.html not found at {index_file_path}.")
+        return {"message": "index.html not found. Ensure the frontend is built."}
     
-    # If the requested path seems like a file in the root of dist (e.g. favicon.ico, manifest.json)
     potential_file_path = os.path.join(FRONTEND_DIR, full_path)
     if os.path.isfile(potential_file_path):
         return FileResponse(potential_file_path)
         
     return FileResponse(index_file_path)
 
-
 if __name__ == "__main__":
-    import uvicorn
-    #reload=True causes issues with in-memory state like active_games
-    #For development where state needs to persist across requests without external db/cache, set to False
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False) # MODIFIED
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
