@@ -87,6 +87,10 @@ const GamePage: React.FC = () => {
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_DELAY_MS = 3000;
 
+  useEffect(() => {
+    console.log('GamePage revealedCards state updated (useEffect):', revealedCards); // DEBUG LOG
+  }, [revealedCards]);
+
   const handleWordCardClick = (index: number) => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
       console.warn('WebSocket not connected. Cannot send word click.');
@@ -104,6 +108,19 @@ const GamePage: React.FC = () => {
       }));
     } else {
       console.log('Word click ignored. Not guesser or guessing not active.');
+    }
+  };
+
+  const handleEndGuessing = () => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN && clientId && myRole === 'guesser' && guessingActive) {
+      console.log(`Guesser ${clientId} is ending their guessing turn.`);
+      ws.current.send(JSON.stringify({
+        type: 'END_GUESSING',
+        gameId: gameId,
+        clientId: clientId,
+      }));
+    } else {
+      console.warn('Cannot end guessing: Conditions not met.');
     }
   };
 
@@ -205,7 +222,7 @@ const GamePage: React.FC = () => {
     };
 
     ws.current.onclose = (event) => {
-      console.log(`WebSocket disconnected. Code: ${event.code}, Reason: ${event.reason}`);
+      console.error(`WebSocket disconnected. Code: ${event.code}, Reason: '${event.reason}', WasClean: ${event.wasClean}`);
       setIsConnected(false);
       if (event.code !== 1000 && event.code !== 1005 && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectTimeoutRef.current = window.setTimeout(() => {
@@ -247,7 +264,7 @@ const GamePage: React.FC = () => {
         clearTimeout(reconnectTimeoutRef.current); // Clear any pending reconnect timeouts
       }
     };
-  }, [gameId, clientId, connect]); 
+  }, [connect, gameId, clientId]); 
 
   const handleSendStroke = (points: number[][], color: string, width: number, tool: 'pen' | 'eraser') => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN && clientId) {
@@ -375,6 +392,9 @@ const GamePage: React.FC = () => {
             <button onClick={handleClearCanvas} style={{ marginRight: '10px' }}>Clear My Drawing</button>
             <button onClick={handleSubmitDrawing}>Submit Drawing</button>
           </>
+        )}
+        {myRole === 'guesser' && guessingActive && !gameOver && isConnected && (
+          <button onClick={handleEndGuessing}>End Guessing & Start Drawing</button>
         )}
       </div>
 

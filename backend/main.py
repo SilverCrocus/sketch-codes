@@ -33,7 +33,7 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["**"],
+    allow_origins=["**"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -414,12 +414,19 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                         print(f"INFO: GUESS_WORD card at index {word_index} already revealed by {actor_client_id}.")
                         continue
 
-                    drawer_key_card = current_game.key_card_a if current_game.current_drawing_player_id == current_game.player_a_id else current_game.key_card_b
-                    if not drawer_key_card: # Should not happen if roles are set
-                        print(f"CRITICAL_ERROR: Drawer's key card not found for GUESS_WORD. Drawer: {current_game.current_drawing_player_id}")
-                        true_card_type = 'neutral' 
+                    # Determine the key card of the CURRENT GUESSER
+                    guesser_key_card = None
+                    if current_game.current_guessing_player_id == current_game.player_a_id:
+                        guesser_key_card = current_game.key_card_a
+                    elif current_game.current_guessing_player_id == current_game.player_b_id:
+                        guesser_key_card = current_game.key_card_b
+
+                    if not guesser_key_card:
+                        # This indicates a potential issue with role assignment or game state integrity.
+                        print(f"CRITICAL_ERROR: Guesser's key card not found for GUESS_WORD. Guesser ID: {current_game.current_guessing_player_id}, Game ID: {established_game_id}")
+                        true_card_type = 'neutral' # Fallback to prevent crash, but signals a bug.
                     else:
-                        true_card_type = drawer_key_card[word_index]
+                        true_card_type = guesser_key_card[word_index]
 
                     current_game.revealed_cards[word_index] = true_card_type
                     print(f"INFO: Game {established_game_id}: Player {actor_client_id} guessed '{current_game.grid_words[word_index]}' (idx {word_index}). True type: {true_card_type}")
@@ -448,36 +455,62 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                         print(f"GAME_OVER: Assassin card hit by {actor_client_id}! Game Over for game {established_game_id}.")
                         current_game.game_over = True
                         current_game.winner = "Players Lose! (Assassin revealed)"
-                        game_ended_this_guess = True
-                        turn_ended_this_guess = True # Assassin always ends turn
+                        game_ended_this_guess = True # Mark game as ended
+                        # turn_ended_this_guess is implicitly true if assassin hit
 
-                    if turn_ended_this_guess and not game_ended_this_guess:
-                        current_game.guessing_active = False
-                        current_game.drawing_phase_active = True
-                        current_game.drawing_submitted = False # New drawing phase
-                        current_game.correct_guesses_this_turn = 0
-                        current_game.current_turn_drawing_strokes = [] # Clear for new drawer
-                        
-                        prev_drawer = current_game.current_drawing_player_id
+                    # --- Logic for GUESS_WORD causing a turn end (if game didn't end) ---
+                    # A turn ends if a neutral card was hit (turn_ended_this_guess = True),
+                    # or if an assassin was hit / 15 greens found (game_ended_this_guess = True, handled before this).
+                    # Players can manually end their turn via END_GUESSING message.
+                    # Correct green guesses do NOT automatically end the turn.
+                    if not game_ended_this_guess and turn_ended_this_guess:
+                        print(f"INFO: Turn {current_game.turn_number} ended for game {established_game_id} due to guess outcome. Guesses this turn: {current_game.correct_guesses_this_turn}")
+                        temp_drawer = current_game.current_drawing_player_id
                         current_game.current_drawing_player_id = current_game.current_guessing_player_id
-                        current_game.current_guessing_player_id = prev_drawer
-                        current_game.turn_number += 1
-                        print(f"INFO: Roles switched. New Drawer: {current_game.current_drawing_player_id}, New Guesser: {current_game.current_guessing_player_id}. Turn: {current_game.turn_number}")
-                    elif game_ended_this_guess:
+                        current_game.current_guessing_player_id = temp_drawer
+                        
+                        current_game.drawing_phase_active = True
                         current_game.guessing_active = False
-                        current_game.drawing_phase_active = False
-                        print(f"INFO: Game {established_game_id} ended. Outcome: {current_game.winner}")
+                        current_game.drawing_submitted = False
+                        current_game.strokes.clear() # Clear all strokes from the board for the new turn
+                        current_game.current_turn_drawing_strokes.clear() # Clear any strokes from the concluded turn
+                        current_game.turn_number += 1
+                        current_game.correct_guesses_this_turn = 0
+                        print(f"INFO: New turn {current_game.turn_number} after GUESS_WORD. Drawer: {current_game.current_drawing_player_id}, Guesser: {current_game.current_guessing_player_id}. Canvas cleared.")
+
+                elif message_type == "END_GUESSING":
+                    requesting_client_id_from_payload = payload.get("clientId")
+                    print(f"INFO: Received END_GUESSING from {actor_client_id} (payload clientId: {requesting_client_id_from_payload}) for game {established_game_id}")
+
+                    if not (actor_client_id == current_game.current_guessing_player_id and current_game.guessing_active and not current_game.game_over):
+                        print(f"WARN: END_GUESSING from {actor_client_id} ignored. Conditions not met. Current guesser: {current_game.current_guessing_player_id}, Guessing active: {current_game.guessing_active}, Game over: {current_game.game_over}")
+                    else:
+                        print(f"INFO: Player {actor_client_id} ended guessing. Switching roles for game {established_game_id}.")
+                        # Switch roles
+                        previous_drawer = current_game.current_drawing_player_id
+                        current_game.current_drawing_player_id = current_game.current_guessing_player_id # Guesser becomes drawer
+                        current_game.current_guessing_player_id = previous_drawer # Drawer becomes guesser
+
+                        # Reset game state for the new turn
+                        current_game.drawing_phase_active = True
+                        current_game.guessing_active = False
+                        current_game.drawing_submitted = False
+                        current_game.strokes.clear() # Clear all strokes from the board
+                        current_game.current_turn_drawing_strokes.clear() # Clear any strokes from the current turn
+                        current_game.turn_number += 1
+                        current_game.correct_guesses_this_turn = 0
+                        
+                        print(f"INFO: New turn {current_game.turn_number} initiated by END_GUESSING. Drawer: {current_game.current_drawing_player_id}, Guesser: {current_game.current_guessing_player_id}. Canvas cleared.")
+                
+                # After processing any message type that might change game state or roles:
+                if established_game_id in active_games: # Ensure game still exists
+                    current_game_state_for_broadcast = active_games.get(established_game_id)
+                    if current_game_state_for_broadcast: # Check again, as it might be deleted in another async context
+                         await broadcast_game_state(established_game_id)
+                    else:
+                        print(f"WARN: Game {established_game_id} became inactive before final broadcast in message loop for {actor_client_id}.")
                 else:
-                    print(f"WARN: Unknown message type '{message_type}' from {actor_client_id} in game {established_game_id}. Payload: {payload}")
-
-                if established_game_id in active_games:
-                    await broadcast_game_state(established_game_id)
-                else: # Game might have been removed by another process or due to player disconnect
-                    if websocket.client_state == WebSocketState.CONNECTED:
-                         print(f"WARN: Game {established_game_id} no longer active for broadcast. Closing ws for {actor_client_id}.")
-                         await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
-                    break 
-
+                    print(f"WARN: Game {established_game_id} not in active_games for final broadcast for {actor_client_id}. Client might be closing.")
             except json.JSONDecodeError:
                 print(f"ERROR: JSONDecodeError from {established_client_id}. Msg: '{message_text}'")
                 continue

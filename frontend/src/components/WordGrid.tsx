@@ -31,6 +31,16 @@ const WordGrid: React.FC<WordGridProps> = ({
   isCurrentGuesser,
   myRole // Added prop
 }) => {
+  // Helper function to get icon for card type
+  const getIconForCardType = (cardType: string): string | null => {
+    switch (cardType) {
+      case 'green': return '✅';
+      case 'assassin': return '💀';
+      case 'neutral': return '➖';
+      default: return '❓'; // Should ideally not happen
+    }
+  };
+
   // Helper function to determine the styling for each card
   const getCardStyle = (index: number): React.CSSProperties => {
     const baseStyle = { ...styles.gridTile }; // Default style from styles object
@@ -67,18 +77,47 @@ const WordGrid: React.FC<WordGridProps> = ({
       // else: unrevealed cards remain default for spectator
     }
 
+    // ---- START: Updated logic for Flipped Card Appearance ----
+    if (revealedCards[index]) {
+      // For revealed cards, set a generic 'flipped' background and hide original text.
+      // The icon will be rendered separately in the JSX.
+      cardColor = '#E0E0E0'; // A generic 'flipped' light grey color
+      textColor = '#E0E0E0'; // Make text same color as background to effectively hide it
+      // If you want revealed cards to still show their team color subtly under the icon:
+      // switch (revealedCards[index]) {
+      //   case 'green': cardColor = '#a5d6a7'; break; // Lighter green
+      //   case 'assassin': cardColor = '#ef9a9a'; break; // Lighter red
+      //   case 'neutral': cardColor = '#cfd8dc'; break; // Lighter neutral
+      //   default: cardColor = '#E0E0E0'; break;
+      // }
+    }
+    // ---- END: Updated logic for Flipped Card Appearance ----
+
     // Apply clickable styling for the active guesser on unrevealed cards
     if (myRole === 'guesser' && isCurrentGuesser && isGuessingActive && !revealedCards[index]) {
       cursorStyle = 'pointer';
       borderStyle = '2px solid #2196f3'; // Blue outline to indicate clickable
     }
 
+    // ADD THIS DEBUG LOG (EXAMPLE FOR INDEX 19)
+    if (index === 19) { // You can change this index or make it log for all
+        console.log(`WordGrid Card Index ${index}: revealed='${revealedCards[index]}', computed cardColor='${cardColor}', myRole='${myRole}', keyCard[${index}]='${keyCard[index]}'`);
+    }
+    
     return { 
       ...baseStyle, 
       backgroundColor: cardColor,
       color: textColor,
       cursor: cursorStyle,
-      border: borderStyle
+      border: borderStyle,
+      // Ensure text for icon is visible if textColor was set to match cardColor for hiding word
+      // We can set a specific color for icons if needed, or ensure icons are distinguishable
+      // For simplicity, if icons are emojis, they often have their own color.
+      // If textColor is the same as cardColor (to hide the word), icons might need explicit styling if they are text-based.
+      // However, emojis usually render fine.
+      display: 'flex',        // Keep flex for centering content (icon or word)
+      alignItems: 'center',
+      justifyContent: 'center'
     };
   };
   
@@ -107,10 +146,14 @@ const WordGrid: React.FC<WordGridProps> = ({
         {words.map((word, index) => (
           <div
             key={index}
-            style={getCardStyle(index)}
+            style={getCardStyle(index)} // getCardStyle now includes icon info via data attributes or can return more complex object
             onClick={() => handleWordClick(index)}
           >
-            {word}
+            {/* Conditionally render word or icon based on revealed state */}
+            {revealedCards[index] 
+              ? <span style={{ fontSize: '1.5em' }}>{getIconForCardType(revealedCards[index])}</span> // Display icon if revealed
+              : word // Display word if not revealed
+            }
           </div>
         ))}
       </div>
