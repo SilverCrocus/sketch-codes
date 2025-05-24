@@ -197,8 +197,8 @@ const GamePage: React.FC = () => {
             setGuessingActive(gameState.guessing_active ?? false);
             setCorrectGuessesThisTurn(gameState.correct_guesses_this_turn ?? 0);
             setTurnNumber(gameState.turn_number ?? 0);
-            setGameOver(gameState.game_over ?? false);
-            setWinner(gameState.winner ?? null);
+            setGameOver(gameState.game_over || false);
+            setWinner(gameState.winner || null);
             setConnectedClientIds(gameState.connected_client_ids || []);
 
             if (Array.isArray(gameState.grid_words)) setGridWords(gameState.grid_words);

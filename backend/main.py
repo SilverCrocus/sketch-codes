@@ -414,7 +414,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                         print(f"INFO: GUESS_WORD card at index {word_index} already revealed by {actor_client_id}.")
                         continue
 
-                    # Determine the key card of the CURRENT GUESSER
+                    # 1. Determine the actual type of the card revealed, from the GUESSER'S perspective.
                     guesser_key_card = None
                     if current_game.current_guessing_player_id == current_game.player_a_id:
                         guesser_key_card = current_game.key_card_a
@@ -422,49 +422,96 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                         guesser_key_card = current_game.key_card_b
 
                     if not guesser_key_card:
-                        # This indicates a potential issue with role assignment or game state integrity.
-                        print(f"CRITICAL_ERROR: Guesser's key card not found for GUESS_WORD. Guesser ID: {current_game.current_guessing_player_id}, Game ID: {established_game_id}")
-                        true_card_type = 'neutral' # Fallback to prevent crash, but signals a bug.
+                        print(f"CRITICAL_ERROR: Guesser's key card not found. Guesser ID: {current_game.current_guessing_player_id}, Game: {established_game_id}")
+                        # This is a critical state error. For now, treat as neutral to avoid crash.
+                        actual_revealed_type = 'neutral'
                     else:
-                        true_card_type = guesser_key_card[word_index]
-
-                    current_game.revealed_cards[word_index] = true_card_type
-                    print(f"INFO: Game {established_game_id}: Player {actor_client_id} guessed '{current_game.grid_words[word_index]}' (idx {word_index}). True type: {true_card_type}")
+                        actual_revealed_type = guesser_key_card[word_index]
+                    
+                    print(f"INFO: Game {established_game_id}: Guesser {actor_client_id} revealed '{current_game.grid_words[word_index]}' (idx {word_index}) as type '{actual_revealed_type}' (guesser's perspective).")
 
                     game_ended_this_guess = False
                     turn_ended_this_guess = False
 
-                    if true_card_type == 'green':
-                        current_game.correct_guesses_this_turn += 1
-                        player_a_green_indices = {i for i, t in enumerate(current_game.key_card_a) if t == 'green'}
-                        player_b_green_indices = {i for i, t in enumerate(current_game.key_card_b) if t == 'green'}
-                        all_target_green_indices = player_a_green_indices.union(player_b_green_indices)
-                        revealed_target_greens = sum(1 for i in all_target_green_indices if current_game.revealed_cards[i] == 'green')
-                        
-                        print(f"INFO: Revealed target green cards: {revealed_target_greens} / {len(all_target_green_indices)}")
-                        if revealed_target_greens >= 15:
-                             current_game.game_over = True
-                             current_game.winner = "Players Win! (15 green words identified)"
-                             game_ended_this_guess = True
-                             print(f"GAME_OVER: Players win in game {established_game_id}!")
-
-                    elif true_card_type == 'neutral':
-                        print(f"INFO: Neutral card hit by {actor_client_id}. Turn ends.")
-                        turn_ended_this_guess = True
-                    elif true_card_type == 'assassin':
-                        print(f"GAME_OVER: Assassin card hit by {actor_client_id}! Game Over for game {established_game_id}.")
+                    # 2. FIRST, check for immediate game-ending conditions based on what the GUESSER revealed for THEMSELVES.
+                    if actual_revealed_type == 'assassin':
+                        print(f"GAME_OVER: Guesser {actor_client_id} revealed THEIR OWN assassin card! Game Over for game {established_game_id}.")
                         current_game.game_over = True
-                        current_game.winner = "Players Lose! (Assassin revealed)"
-                        game_ended_this_guess = True # Mark game as ended
-                        # turn_ended_this_guess is implicitly true if assassin hit
+                        current_game.winner = "Players Lose! (Guesser revealed their own Assassin)"
+                        game_ended_this_guess = True
+                    
+                    # 3. IF THE GAME HASN'T ENDED by the guesser hitting their own assassin:
+                    if not game_ended_this_guess:
+                        # Determine the card type from the DRAWER'S perspective. This dictates turn continuation.
+                        drawer_id = current_game.current_drawing_player_id
+                        drawer_key_card = None
+                        if drawer_id == current_game.player_a_id:
+                            drawer_key_card = current_game.key_card_a
+                        elif drawer_id == current_game.player_b_id:
+                            drawer_key_card = current_game.key_card_b
 
-                    # --- Logic for GUESS_WORD causing a turn end (if game didn't end) ---
-                    # A turn ends if a neutral card was hit (turn_ended_this_guess = True),
-                    # or if an assassin was hit / 15 greens found (game_ended_this_guess = True, handled before this).
-                    # Players can manually end their turn via END_GUESSING message.
-                    # Correct green guesses do NOT automatically end the turn.
-                    if not game_ended_this_guess and turn_ended_this_guess:
+                        if not drawer_key_card:
+                            print(f"CRITICAL_ERROR: Drawer's key card not found. Drawer ID: {drawer_id}, Game: {established_game_id}")
+                            # Fallback: treat as neutral from drawer's perspective to avoid crash.
+                            card_type_for_drawer = 'neutral' 
+                        else:
+                            card_type_for_drawer = drawer_key_card[word_index]
+                        
+                        print(f"INFO: Game {established_game_id}: For drawer {drawer_id}, card '{current_game.grid_words[word_index]}' (idx {word_index}) is type '{card_type_for_drawer}'.")
+
+                        # Set revealed_cards based on drawer's perspective, unless guesser hit own assassin
+                        if not game_ended_this_guess: # game_ended_this_guess is true if guesser hit own assassin
+                            current_game.revealed_cards[word_index] = card_type_for_drawer
+                            print(f"INFO: Game {established_game_id}: Card {word_index} officially revealed as '{card_type_for_drawer}' (drawer's perspective).")
+                        else: # Guesser hit their own assassin (actual_revealed_type is 'assassin')
+                            current_game.revealed_cards[word_index] = actual_revealed_type
+                            print(f"INFO: Game {established_game_id}: Card {word_index} officially revealed as '{actual_revealed_type}' (guesser's own assassin).")
+                        
+                        # Evaluate based on the DRAWER'S perspective of the card.
+                        if card_type_for_drawer == 'green':
+                            # CORRECT GUESS: Guesser found a card that is green for the drawer.
+                            print(f"INFO: Correct guess by {actor_client_id}! Card is green for drawer {drawer_id}. Turn continues.")
+                            current_game.correct_guesses_this_turn += 1
+                            
+                            # Check overall win condition (15 total unique green cards revealed).
+                            # These are the cards that *should* be green for players A and B respectively.
+                            target_green_for_A = {i for i, card_type in enumerate(current_game.key_card_a) if card_type == 'green'}
+                            target_green_for_B = {i for i, card_type in enumerate(current_game.key_card_b) if card_type == 'green'}
+                            all_target_green_indices_for_win = target_green_for_A.union(target_green_for_B)
+
+                            revealed_as_green_count = 0
+                            for idx_win_check in all_target_green_indices_for_win:
+                                if current_game.revealed_cards[idx_win_check] == 'green': # Check against actual revealed type
+                                     revealed_as_green_count +=1
+                            
+                            print(f"INFO: Revealed target green cards for win condition: {revealed_as_green_count} / {len(all_target_green_indices_for_win)}")
+                            if revealed_as_green_count >= 15: # Win condition
+                                 current_game.game_over = True
+                                 current_game.winner = "Players Win! (15 green words identified)"
+                                 game_ended_this_guess = True
+                                 print(f"GAME_OVER: Players win in game {established_game_id}!")
+
+                        elif card_type_for_drawer == 'neutral':
+                            # INCORRECT GUESS (Neutral for Drawer): Guesser picked a card that is neutral for the drawer.
+                            # This includes if the guesser picked THEIR OWN green card (which is neutral for the drawer).
+                            print(f"INFO: Incorrect guess by {actor_client_id}. Card is neutral for drawer {drawer_id}. Turn ends.")
+                            turn_ended_this_guess = True
+
+                        elif card_type_for_drawer == 'assassin':
+                            # INCORRECT GUESS (Assassin for Drawer): Guesser picked a card that is an assassin for the drawer.
+                            print(f"GAME_OVER: Guesser {actor_client_id} revealed DRAWER'S assassin card ({drawer_id})! Game Over for game {established_game_id}.")
+                            current_game.game_over = True
+                            current_game.winner = "Players Lose! (Guesser revealed Drawer's Assassin)"
+                            game_ended_this_guess = True
+
+                    # --- Logic for GUESS_WORD causing a turn end or game end ---
+                    if game_ended_this_guess:
+                        print(f"INFO: Game {established_game_id} ended due to guess.")
+                        # Game state (game_over, winner) already set. Broadcast will reflect this.
+                    elif turn_ended_this_guess: # Game not ended, but turn ended
                         print(f"INFO: Turn {current_game.turn_number} ended for game {established_game_id} due to guess outcome. Guesses this turn: {current_game.correct_guesses_this_turn}")
+                        
+                        # Role switch and state reset for new turn
                         temp_drawer = current_game.current_drawing_player_id
                         current_game.current_drawing_player_id = current_game.current_guessing_player_id
                         current_game.current_guessing_player_id = temp_drawer
@@ -476,7 +523,9 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                         current_game.current_turn_drawing_strokes.clear() # Clear any strokes from the concluded turn
                         current_game.turn_number += 1
                         current_game.correct_guesses_this_turn = 0
-                        print(f"INFO: New turn {current_game.turn_number} after GUESS_WORD. Drawer: {current_game.current_drawing_player_id}, Guesser: {current_game.current_guessing_player_id}. Canvas cleared.")
+                        print(f"INFO: New turn {current_game.turn_number} after GUESS_WORD. Drawer: {current_game.current_drawing_player_id}, Guesser: {current_game.current_guessing_player_id}. Canvas cleared. Display overrides cleared.")
+                    # If neither game_ended_this_guess nor turn_ended_this_guess is true, it means a correct green guess was made
+                    # and the turn continues. In this case, display_override should persist for the current turn.
 
                 elif message_type == "END_GUESSING":
                     requesting_client_id_from_payload = payload.get("clientId")
@@ -500,7 +549,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                         current_game.turn_number += 1
                         current_game.correct_guesses_this_turn = 0
                         
-                        print(f"INFO: New turn {current_game.turn_number} initiated by END_GUESSING. Drawer: {current_game.current_drawing_player_id}, Guesser: {current_game.current_guessing_player_id}. Canvas cleared.")
+                        print(f"INFO: New turn {current_game.turn_number} initiated by END_GUESSING. Drawer: {current_game.current_drawing_player_id}, Guesser: {current_game.current_guessing_player_id}. Canvas cleared. Display overrides cleared.")
                 
                 # After processing any message type that might change game state or roles:
                 if established_game_id in active_games: # Ensure game still exists
