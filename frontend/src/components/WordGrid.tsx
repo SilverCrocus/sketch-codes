@@ -1,4 +1,6 @@
 import React from 'react';
+import duckIconUrl from '../assets/small-duck.svg';
+import starIconUrl from '../assets/star-small.svg';
 
 interface CardRevealStatus {
   revealed_by_guesser_for_a: string | null;
@@ -168,21 +170,49 @@ const WordGrid: React.FC<WordGridProps> = ({
     <div>
       {/* Main Word Grid */}
       <div style={styles.gridContainer}>
-        {gridWords.map((word, index) => (
-          <div
-            key={index}
-            style={getCardStyle(index)} // getCardStyle now includes icon info via data attributes or can return more complex object
-            onClick={() => handleWordClick(index)}
-          >
-            {(() => {
-              const effectiveType = getEffectiveCardTypeForDisplay(index);
-              if (effectiveType) {
-                return <span style={{ fontSize: '1.5em' }}>{getIconForCardType(effectiveType)}</span>;
-              }
-              return word;
-            })()}
-          </div>
-        ))}
+        {gridWords.map((word, index) => {
+          const cardStatus = gridRevealStatus[index];
+          let tokenUrl = null;
+
+          if (cardStatus) {
+            if (cardStatus.revealed_by_guesser_for_a) {
+              tokenUrl = duckIconUrl; // Player A's turn revealed this
+            } else if (cardStatus.revealed_by_guesser_for_b) {
+              tokenUrl = starIconUrl; // Player B's turn revealed this
+            }
+          }
+
+          // Log for debugging token display
+          console.log(
+            `[WordGrid Card ${index}] Status:`, cardStatus, 
+            `ActivePerspective: ${activeClueGiverPerspective}`, 
+            `TokenURL: ${tokenUrl}`
+          );
+
+          return (
+            <div
+              key={index}
+              className="word-card" // Ensure this class is present for CSS targeting
+              style={getCardStyle(index)} 
+              onClick={() => handleWordClick(index)}
+            >
+              {/* Original logic for main card type icon - assuming these helper functions exist */}
+              {(() => {
+                const effectiveType = getEffectiveCardTypeForDisplay(index);
+                if (effectiveType) {
+                  return <span className="card-type-icon" style={{ fontSize: '1.5em' }}>{getIconForCardType(effectiveType)}</span>;
+                }
+                return null;
+              })()}
+
+              {/* Word text */}
+              <span className="word-text">{word.toUpperCase()}</span>
+
+              {/* New SVG Token for clicked status */}
+              {tokenUrl && <img src={tokenUrl} alt="token" className="clicked-svg-token" />}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

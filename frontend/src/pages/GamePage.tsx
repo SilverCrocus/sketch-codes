@@ -238,7 +238,10 @@ const GamePage: React.FC = () => {
               console.log('[WebSocket GAME_STATE] Set keyCardB:', gameState.key_card_b.length > 0 ? gameState.key_card_b[0] : 'empty_or_short');
             }
             if (gameState.grid_reveal_status) {
-              console.log("[WebSocket OnMessage] Received grid_reveal_status:", gameState.grid_reveal_status); // DEBUG LOG
+              console.log(
+            "[GamePage OnMessage GAME_STATE] Received grid_reveal_status:", 
+            JSON.stringify(gameState.grid_reveal_status, null, 2) // Stringify for clear logging
+        );
               setGridRevealStatus(gameState.grid_reveal_status);
             }
             if (gameState.player_type) {

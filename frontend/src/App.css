@@ -1,1 +1,15 @@
+/* Add any global styles or App specific styles here */
 
+.word-card {
+  position: relative; /* Ensure the card is a positioning context for the token */
+}
+
+.clicked-svg-token {
+  position: absolute;
+  top: 3px; /* Adjust as needed for visual preference */
+  right: 3px; /* Adjust as needed for visual preference */
+  width: 20px; /* Adjust size as needed */
+  height: 20px; /* Adjust size as needed */
+  z-index: 5;  /* Ensure it's above other card content but potentially below overlays if any */
+  pointer-events: none; /* So it doesn't interfere with card clicks */
+}
