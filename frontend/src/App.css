@@ -8,8 +8,8 @@
   position: absolute;
   top: 3px; /* Adjust as needed for visual preference */
   right: 3px; /* Adjust as needed for visual preference */
-  width: 20px; /* Adjust size as needed */
-  height: 20px; /* Adjust size as needed */
+  width: 25px; /* Adjust size as needed */
+  height: 25px; /* Adjust size as needed */
   z-index: 5;  /* Ensure it's above other card content but potentially below overlays if any */
   pointer-events: none; /* So it doesn't interfere with card clicks */
 }

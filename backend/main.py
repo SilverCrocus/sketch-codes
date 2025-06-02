@@ -486,52 +486,64 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                     game_ended_this_guess = False
                     turn_ended_this_guess = False
 
-                    # --- Game Ending Assassin Conditions ---
-                    if card_type_on_guesser_map == 'assassin' and card_type_on_clue_giver_map == 'assassin':
+                    # --- Assassin Logic ---
+                    is_double_assassin = card_type_on_guesser_map == 'assassin' and card_type_on_clue_giver_map == 'assassin'
+                    is_clue_giver_map_assassin = card_type_on_clue_giver_map == 'assassin'
+                    is_guesser_map_assassin = card_type_on_guesser_map == 'assassin'
+
+                    if is_double_assassin:
                         print(f"GAME_OVER: Double Assassin! Card {word_index} ('{game_state.grid_words[word_index]}'). Game {established_game_id}.")
                         game_state.game_over = True
                         game_state.winner = "Players Lose! (Double Assassin)"
-                        card_status_obj.revealed_by_guesser_for_a = 'assassin'
+                        card_status_obj.revealed_by_guesser_for_a = 'assassin' # Mark for both perspectives
                         card_status_obj.revealed_by_guesser_for_b = 'assassin'
                         game_ended_this_guess = True
-                        turn_ended_this_guess = True
-                    elif card_type_on_guesser_map == 'assassin': # Guesser hits own assassin (not a double)
-                        print(f"GAME_OVER: Guesser {actor_client_id} hit their OWN Assassin! Card {word_index} ('{game_state.grid_words[word_index]}'). Game {established_game_id}.")
-                        game_state.game_over = True
-                        game_state.winner = f"Players Lose! (Guesser Player {'A' if guesser_is_player_a else 'B'} hit own Assassin)"
-                        if guesser_is_player_a:
-                            card_status_obj.revealed_by_guesser_for_a = 'assassin'
-                        else:
-                            card_status_obj.revealed_by_guesser_for_b = 'assassin'
-                        game_ended_this_guess = True
-                        turn_ended_this_guess = True
-                    elif card_type_on_clue_giver_map == 'assassin': # Clue giver's card is assassin (guesser didn't hit own, not a double)
+                        # turn_ended_this_guess implicitly true if game_ended_this_guess is true
+
+                    elif is_clue_giver_map_assassin: # Clue giver's map is assassin (and not a double, due to elif)
                         print(f"GAME_OVER: Guesser {actor_client_id} revealed Clue Giver {clue_giver_id}'s Assassin! Card {word_index} ('{game_state.grid_words[word_index]}'). Game {established_game_id}.")
                         game_state.game_over = True
-                        game_state.winner = f"Players Lose! (Revealed Clue Giver Player {'A' if clue_giver_is_player_a else 'B'}'s Assassin)"
+                        game_state.winner = "Players Lose! (Assassin Revealed)" # User: "no one wins"
                         if clue_giver_is_player_a:
                             card_status_obj.revealed_by_guesser_for_a = 'assassin'
                         else:
                             card_status_obj.revealed_by_guesser_for_b = 'assassin'
                         game_ended_this_guess = True
+
+                    elif is_guesser_map_assassin: # Guesser's map is assassin (not double, not clue giver's assassin that ends game)
+                        # Turn Ends, Game Continues - Guesser Hit Own Assassin
+                        print(f"INFO: Guesser {actor_client_id} hit their OWN Assassin! Card {word_index} ('{game_state.grid_words[word_index]}'). Turn ends. Game continues.")
+                        # No game_over, no winner set here.
+                        # No card_status_obj update for revealed_by_guesser_for_A/B, as this is for the clue giver's turn perspective.
+                        # The guesser sees their own map; this card is not "revealed" for the clue giver's score/objective.
                         turn_ended_this_guess = True
+                        # game_ended_this_guess remains False for this specific case.
 
-                    # --- If Game Not Ended by Assassin, Process Guess Outcome & Win Condition ---
+                    # --- If Game Not Ended by Assassin, Process Regular Guess (Green/Neutral) ---
                     if not game_ended_this_guess:
-                        revealed_type_for_clue_giver_turn = card_type_on_clue_giver_map
-                        if clue_giver_is_player_a:
-                            card_status_obj.revealed_by_guesser_for_a = revealed_type_for_clue_giver_turn
-                        else:
-                            card_status_obj.revealed_by_guesser_for_b = revealed_type_for_clue_giver_turn
-                        
-                        print(f"INFO: Card {word_index} ('{game_state.grid_words[word_index]}') marked as '{revealed_type_for_clue_giver_turn}' for Clue Giver {clue_giver_id}'s turn.")
+                        # Only proceed if the turn wasn't already ended by the guesser hitting their own assassin
+                        if not turn_ended_this_guess:
+                            revealed_type_for_clue_giver_turn = card_type_on_clue_giver_map # This will be 'green' or 'neutral'
+                            
+                            if clue_giver_is_player_a:
+                                card_status_obj.revealed_by_guesser_for_a = revealed_type_for_clue_giver_turn
+                            else:
+                                card_status_obj.revealed_by_guesser_for_b = revealed_type_for_clue_giver_turn
+                            
+                            print(f"INFO: Card {word_index} ('{game_state.grid_words[word_index]}') marked as '{revealed_type_for_clue_giver_turn}' for Clue Giver {clue_giver_id}'s turn.")
 
-                        if revealed_type_for_clue_giver_turn == 'green':
-                            game_state.correct_guesses_this_turn += 1
-                            print(f"INFO: Correct guess for Clue Giver {clue_giver_id}. Turn continues. Correct guesses this turn: {game_state.correct_guesses_this_turn}.")
-                        elif revealed_type_for_clue_giver_turn == 'neutral':
-                            print(f"INFO: Incorrect guess (Neutral for Clue Giver {clue_giver_id}). Turn ends.")
-                            turn_ended_this_guess = True
+                            if revealed_type_for_clue_giver_turn == 'green':
+                                game_state.correct_guesses_this_turn += 1
+                                print(f"INFO: Correct guess for Clue Giver {clue_giver_id}. Turn continues. Correct guesses this turn: {game_state.correct_guesses_this_turn}.")
+                            elif revealed_type_for_clue_giver_turn == 'neutral':
+                                print(f"INFO: Incorrect guess (Neutral for Clue Giver {clue_giver_id}). Turn ends.")
+                                turn_ended_this_guess = True
+                            # Note: card_type_on_clue_giver_map cannot be 'assassin' here if game is to continue, 
+                            # as that would have been caught by 'is_clue_giver_map_assassin' and set game_ended_this_guess = True.
+                        
+                        # Win condition check (e.g., 15 green cards) happens regardless of whether this specific guess ended the turn by being neutral
+                        # or if the turn was ended by guesser's own assassin (as long as game didn't end from double/clue-giver assassin).
+                        # (The win condition logic starting at line 535 in original code should follow here)
                         
                         # Check for Win Condition (only if game not ended by assassin)
                         all_target_green_indices_for_win = set()
