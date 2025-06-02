@@ -146,6 +146,7 @@ const GamePage: React.FC = () => {
         console.log("WebSocket is already open or connecting. Aborting new connection attempt.");
         return;
     }
+    console.log(`[Connect] gameId: ${lowerCaseGameId}, clientId: ${clientId}`);
     console.log(`Attempting to connect to WebSocket: ${wsUrl} (Attempt: ${reconnectAttempts + 1})`);
     ws.current = new WebSocket(wsUrl);
 
@@ -224,14 +225,28 @@ const GamePage: React.FC = () => {
     ws.current.onclose = (event) => {
       console.error(`WebSocket disconnected. Code: ${event.code}, Reason: '${event.reason}', WasClean: ${event.wasClean}`);
       setIsConnected(false);
-      if (event.code !== 1000 && event.code !== 1005 && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+
+      // If it's a 1006 error (abnormal closure, often meaning server rejected handshake for non-existent game)
+      // OR if max attempts are reached for other retryable codes.
+      // Note: reconnectAttempts is 0-indexed for attempts made, so check against MAX_RECONNECT_ATTEMPTS - 1 for the next attempt.
+      if (event.code === 1006 || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS -1 ) {
+        if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current); // Clear any pending timeout immediately
+
+        if (event.code === 1006) {
+            console.warn(`WebSocket connection to ${gameId} failed (Code 1006), game likely no longer exists. Navigating to home.`);
+            alert('The game session has ended or the connection was refused. Returning to the home page.');
+        } else {
+            console.warn(`Max reconnect attempts reached for ${gameId}. Navigating to home.`);
+            alert('Could not re-establish connection to the game server after multiple attempts. Returning to the home page.');
+        }
+        setReconnectAttempts(0); // Reset attempts for a future fresh navigation to game page
+        navigate('/');
+      } else if (event.code !== 1000 && event.code !== 1005) { // For other potentially recoverable errors
+        console.log(`Reconnect attempt ${reconnectAttempts + 1} scheduled for ${gameId}. Code: ${event.code}`);
         reconnectTimeoutRef.current = window.setTimeout(() => {
           setReconnectAttempts(prev => prev + 1);
           connect();
         }, RECONNECT_DELAY_MS);
-      } else if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        alert('Could not connect to the game server. Please try again later.');
-        navigate('/');
       }
     };
 
@@ -243,7 +258,7 @@ const GamePage: React.FC = () => {
   useEffect(() => {
     // Ensure we have gameId and clientId before attempting to connect
     if (gameId && clientId) {
-      console.log(`useEffect for connection triggered. gameId: ${gameId}, clientId: ${clientId}`)
+      console.log(`[useEffect-Connect] gameId: ${gameId}, clientId: ${clientId}`);
       connect();
     }
     

@@ -178,6 +178,7 @@ else:
 
 @app.websocket("/ws/{game_id_path}/{client_id_path}")
 async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_path: str):
+    print(f"[Backend WebSocket] Received connection attempt for game: {game_id_path}, client: {client_id_path}")
     established_game_id: Optional[str] = None
     established_client_id: Optional[str] = None
 
