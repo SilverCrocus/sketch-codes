@@ -27,6 +27,11 @@ interface WebSocketMessage {
   senderClientId?: string;
 }
 
+interface CardRevealStatus {
+  revealed_by_guesser_for_a: string | null;
+  revealed_by_guesser_for_b: string | null;
+}
+
 interface GameStatePayload {
   game_id: string;
   strokes: BackendStrokePayload[];
@@ -37,13 +42,16 @@ interface GameStatePayload {
   turn_number: number;
   connected_client_ids: string[];
   grid_words?: string[];
-  key_card?: string[];
-  revealed_cards?: string[];
+  key_card_a?: string[]; // For player A's perspective
+  key_card_b?: string[]; // For player B's perspective
+  // revealed_cards?: string[]; // Replaced by grid_reveal_status
+  grid_reveal_status?: CardRevealStatus[];
   player_type?: 'a' | 'b' | 'spectator';
   guessing_active?: boolean;
   correct_guesses_this_turn?: number;
   game_over?: boolean;
   winner?: string | null;
+  player_identities?: { [clientId: string]: 'a' | 'b' };
 }
 
 const mapBackendStrokeToFrontendStroke = (backendStroke: BackendStrokePayload): StrokeData => {
@@ -80,16 +88,16 @@ const GamePage: React.FC = () => {
   const [reconnectAttempts, setReconnectAttempts] = useState<number>(0);
 
   const [gridWords, setGridWords] = useState<string[]>([]);
-  const [keyCard, setKeyCard] = useState<string[]>(Array(25).fill(''));
-  const [revealedCards, setRevealedCards] = useState<string[]>(Array(25).fill(''));
+  const [keyCardA, setKeyCardA] = useState<string[]>(Array(25).fill('')); // Keycard for player A
+  const [keyCardB, setKeyCardB] = useState<string[]>(Array(25).fill('')); // Keycard for player B
+  const [gridRevealStatus, setGridRevealStatus] = useState<CardRevealStatus[]>(() => Array(25).fill(null).map(() => ({ revealed_by_guesser_for_a: null, revealed_by_guesser_for_b: null })));
   const [playerType, setPlayerType] = useState<'a' | 'b' | 'spectator'>('spectator');
+  const [playerIdentities, setPlayerIdentities] = useState<Record<string, 'a' | 'b'>>({});
   const reconnectTimeoutRef = useRef<number | null>(null);
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_DELAY_MS = 3000;
 
-  useEffect(() => {
-    console.log('GamePage revealedCards state updated (useEffect):', revealedCards); // DEBUG LOG
-  }, [revealedCards]);
+  
 
   const handleWordCardClick = (index: number) => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
@@ -123,6 +131,8 @@ const GamePage: React.FC = () => {
       console.warn('Cannot end guessing: Conditions not met.');
     }
   };
+
+  console.log('[GamePage Render] playerType:', playerType, 'keyCardA:', keyCardA.length > 0 ? keyCardA[0] : 'empty', 'keyCardB:', keyCardB.length > 0 ? keyCardB[0] : 'empty');
 
   const myRole = React.useMemo(() => {
     if (!clientId) return 'connecting';
@@ -161,11 +171,27 @@ const GamePage: React.FC = () => {
         const message = JSON.parse(event.data as string) as WebSocketMessage;
         console.log("RAW WebSocket message received:", message);
 
+        console.log('[WebSocket OnMessage] Parsed message type:', message.type, 'Payload:', message.payload); // Diagnostic log
+
         switch (message.type) {
           case 'INITIAL_GAME_DATA':
             const initialPayload = message.payload as GameStatePayload;
+            console.log('[WebSocket INITIAL_GAME_DATA] Processing. Received payload:', initialPayload);
+
             if (Array.isArray(initialPayload.strokes)) {
               setStrokes(initialPayload.strokes.map(mapBackendStrokeToFrontendStroke));
+            }
+            if (initialPayload.player_type) {
+              setPlayerType(initialPayload.player_type);
+              console.log(`[WebSocket INITIAL_GAME_DATA] Set playerType to: ${initialPayload.player_type} for client ${clientId}`);
+            }
+            if (Array.isArray(initialPayload.key_card_a)) {
+              setKeyCardA(initialPayload.key_card_a);
+              console.log('[WebSocket INITIAL_GAME_DATA] Set keyCardA:', initialPayload.key_card_a.length > 0 ? initialPayload.key_card_a[0] : 'empty_or_short');
+            }
+            if (Array.isArray(initialPayload.key_card_b)) {
+              setKeyCardB(initialPayload.key_card_b);
+              console.log('[WebSocket INITIAL_GAME_DATA] Set keyCardB:', initialPayload.key_card_b.length > 0 ? initialPayload.key_card_b[0] : 'empty_or_short');
             }
             break;
           case 'STROKE_DRAWN':
@@ -203,9 +229,23 @@ const GamePage: React.FC = () => {
             setConnectedClientIds(gameState.connected_client_ids || []);
 
             if (Array.isArray(gameState.grid_words)) setGridWords(gameState.grid_words);
-            if (Array.isArray(gameState.key_card)) setKeyCard(gameState.key_card);
-            if (Array.isArray(gameState.revealed_cards)) setRevealedCards(gameState.revealed_cards);
-            if (gameState.player_type) setPlayerType(gameState.player_type);
+            if (Array.isArray(gameState.key_card_a)) {
+              setKeyCardA(gameState.key_card_a);
+              console.log('[WebSocket GAME_STATE] Set keyCardA:', gameState.key_card_a.length > 0 ? gameState.key_card_a[0] : 'empty_or_short');
+            }
+            if (Array.isArray(gameState.key_card_b)) {
+              setKeyCardB(gameState.key_card_b);
+              console.log('[WebSocket GAME_STATE] Set keyCardB:', gameState.key_card_b.length > 0 ? gameState.key_card_b[0] : 'empty_or_short');
+            }
+            if (gameState.grid_reveal_status) {
+              console.log("[WebSocket OnMessage] Received grid_reveal_status:", gameState.grid_reveal_status); // DEBUG LOG
+              setGridRevealStatus(gameState.grid_reveal_status);
+            }
+            if (gameState.player_type) {
+              setPlayerType(gameState.player_type);
+              console.log(`[WebSocket GAME_STATE] Set playerType to: ${gameState.player_type} for client ${clientId}`);
+            }
+            if (gameState.player_identities) setPlayerIdentities(gameState.player_identities);
             break;
           case 'GAME_NOT_FOUND':
             alert(`Error: Game '${gameId}' not found. ${message.payload?.message || ''}`);
@@ -215,7 +255,7 @@ const GamePage: React.FC = () => {
             alert(`Server error: ${message.payload?.error || 'Unknown error'}`);
             break;
           default:
-            console.warn('Received unhandled WebSocket message type:', message.type);
+            console.warn(`[WebSocket OnMessage] Received unknown message type: ${message.type}`, message);
         }
       } catch (error) {
         console.error('Error processing WebSocket message:', error, event.data);
@@ -367,6 +407,16 @@ const GamePage: React.FC = () => {
     }
   };
 
+  // Debug logs for card clickability
+  console.log('[GamePage Render] currentDrawingPlayerId:', currentDrawingPlayerId);
+  console.log('[GamePage Render] playerIdentities:', JSON.stringify(playerIdentities));
+  const perspectiveForGrid = (currentDrawingPlayerId && playerIdentities[currentDrawingPlayerId]) 
+                             ? playerIdentities[currentDrawingPlayerId] 
+                             : null;
+  console.log('[GamePage Render] Calculated activeClueGiverPerspective for WordGrid:', perspectiveForGrid);
+  console.log('[GamePage Render] guessingActive state:', guessingActive);
+  console.log('[GamePage Render] myRole:', myRole);
+
   return (
     <div>
       {!isConnected && <p>Connecting... Attempts: {reconnectAttempts}</p>}
@@ -381,13 +431,18 @@ const GamePage: React.FC = () => {
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '20px' }}>
         <WordGrid 
-          words={gridWords}
-          keyCard={keyCard} 
-          revealedCards={revealedCards}
-          onWordClick={handleWordCardClick} 
-          isGuessingActive={guessingActive && myRole === 'guesser'}
-          isCurrentGuesser={myRole === 'guesser'}
+          gridWords={gridWords} // Corrected prop name
+          // keyCard prop removed as it's not directly used by WordGrid for Duet
+          gridRevealStatus={gridRevealStatus}
+          onCardClick={handleWordCardClick} // Corrected prop name
           myRole={myRole}
+          activeClueGiverPerspective={perspectiveForGrid}
+          isGuessingActive={guessingActive} // Added prop
+          playerKeyCard={(() => {
+            const cardToPass = playerType === 'a' ? keyCardA : (playerType === 'b' ? keyCardB : []);
+            console.log('[GamePage WordGrid Prop] playerType:', playerType, 'Calculated playerKeyCard for WordGrid:', cardToPass.length > 0 ? cardToPass[0] : 'empty_or_short', 'Full length:', cardToPass.length);
+            return cardToPass;
+          })()} // Pass current player's keycard
         /> 
         <DrawingCanvas 
           strokes={myRole === 'drawer' ? [...strokes, ...localStrokes] : strokes} 

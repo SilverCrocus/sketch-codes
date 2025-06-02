@@ -1,13 +1,18 @@
 import React from 'react';
 
+interface CardRevealStatus {
+  revealed_by_guesser_for_a: string | null;
+  revealed_by_guesser_for_b: string | null;
+}
+
 interface WordGridProps {
-  words: string[];
-  keyCard: string[];
-  revealedCards: string[];
-  onWordClick: (index: number) => void;
+  gridWords: string[];
+  gridRevealStatus: CardRevealStatus[];
+  onCardClick: (index: number) => void;
+  myRole: 'drawer' | 'guesser' | 'spectator' | 'connecting';
+  activeClueGiverPerspective: 'a' | 'b' | null;
   isGuessingActive: boolean;
-  isCurrentGuesser: boolean;
-  myRole: 'drawer' | 'guesser' | 'spectator' | 'connecting'; // Added for role-specific rendering
+  playerKeyCard: string[]; // Keycard for the current player's perspective
 }
 
 // Add CSS animation for the spinner
@@ -23,13 +28,13 @@ const SpinnerAnimation = () => (
 );
 
 const WordGrid: React.FC<WordGridProps> = ({ 
-  words, 
-  keyCard, 
-  revealedCards, 
-  onWordClick, 
+  gridWords, 
+  gridRevealStatus,
+  onCardClick, 
+  myRole,
+  activeClueGiverPerspective,
   isGuessingActive,
-  isCurrentGuesser,
-  myRole // Added prop
+  playerKeyCard // Destructure the new prop
 }) => {
   // Helper function to get icon for card type
   const getIconForCardType = (cardType: string): string | null => {
@@ -41,6 +46,49 @@ const WordGrid: React.FC<WordGridProps> = ({
     }
   };
 
+  const getEffectiveCardTypeForDisplay = (index: number): string | null => {
+    const status = gridRevealStatus[index];
+    if (!status) return null;
+
+    if (status.revealed_by_guesser_for_a === 'assassin' || status.revealed_by_guesser_for_b === 'assassin') {
+      return 'assassin';
+    }
+    if (status.revealed_by_guesser_for_a === 'green' || status.revealed_by_guesser_for_b === 'green') {
+      return 'green'; // Show combined green for win condition clarity
+    }
+    
+    // If not a game-ending assassin or team-wide green, show based on active clue giver's reveal
+    if (activeClueGiverPerspective === 'a' && status.revealed_by_guesser_for_a) {
+      return status.revealed_by_guesser_for_a;
+    }
+    if (activeClueGiverPerspective === 'b' && status.revealed_by_guesser_for_b) {
+      return status.revealed_by_guesser_for_b;
+    }
+    return null; // Not revealed in a way that changes display from keycard
+  };
+
+  const isCardClickable = (idx: number): boolean => {
+    if (!isGuessingActive || myRole !== 'guesser' || !activeClueGiverPerspective) {
+      return false;
+    }
+    const status = gridRevealStatus[idx];
+    if (!status) return false;
+
+    // Cannot click if it's an assassin for anyone (game would have ended or card permanently dead)
+    if (status.revealed_by_guesser_for_a === 'assassin' || status.revealed_by_guesser_for_b === 'assassin') {
+      return false;
+    }
+
+    // Clickable if not yet revealed from the perspective of the current clue giver
+    if (activeClueGiverPerspective === 'a') {
+      return status.revealed_by_guesser_for_a === null;
+    }
+    if (activeClueGiverPerspective === 'b') {
+      return status.revealed_by_guesser_for_b === null;
+    }
+    return false;
+  };
+
   // Helper function to determine the styling for each card
   const getCardStyle = (index: number): React.CSSProperties => {
     const baseStyle = { ...styles.gridTile }; // Default style from styles object
@@ -49,59 +97,41 @@ const WordGrid: React.FC<WordGridProps> = ({
     let cursorStyle = baseStyle.cursor;
     let borderStyle = baseStyle.border;
 
-    // Determine base card color based on role and keyCard/revealedCards
-    if (myRole === 'drawer' || myRole === 'guesser') {
-      // Drawers and Guessers (in Duet style) see their respective keyCard colors for unrevealed cards
-      const trueColor = keyCard[index]; // This should be the player-specific keyCard
-      if (revealedCards[index]) {
-        // If card is revealed, show its revealed color to everyone
-        if (revealedCards[index] === 'green') { cardColor = '#7cb342'; textColor = 'white'; }
-        else if (revealedCards[index] === 'assassin') { cardColor = '#d32f2f'; textColor = 'white'; }
-        else if (revealedCards[index] === 'neutral') { cardColor = '#bdbdbd'; textColor = 'black'; }
-        else { cardColor = '#FFFACD'; textColor = 'black'; } // Revealed team/other color
-      } else {
-        // Card not revealed, show player's keyCard color
-        if (trueColor === 'green') { cardColor = '#7cb342'; textColor = 'white'; }
-        else if (trueColor === 'assassin') { cardColor = '#d32f2f'; textColor = 'white'; }
-        else if (trueColor === 'neutral') { cardColor = '#bdbdbd'; textColor = 'black'; }
-        else { cardColor = '#FFFACD'; textColor = 'black'; } // Player's key for other/team cards
-      }
-    } else if (myRole === 'spectator') {
-      // Spectators only see colors of revealed cards
-      if (revealedCards[index]) {
-        if (revealedCards[index] === 'green') { cardColor = '#7cb342'; textColor = 'white'; }
-        else if (revealedCards[index] === 'assassin') { cardColor = '#d32f2f'; textColor = 'white'; }
-        else if (revealedCards[index] === 'neutral') { cardColor = '#bdbdbd'; textColor = 'black'; }
-        else { cardColor = '#FFFACD'; textColor = 'black'; } // Revealed team/other color
-      }
-      // else: unrevealed cards remain default for spectator
-    }
+    const effectiveType = getEffectiveCardTypeForDisplay(index);
 
-    // ---- START: Updated logic for Flipped Card Appearance ----
-    if (revealedCards[index]) {
-      // For revealed cards, set a generic 'flipped' background and hide original text.
-      // The icon will be rendered separately in the JSX.
-      cardColor = '#E0E0E0'; // A generic 'flipped' light grey color
-      textColor = '#E0E0E0'; // Make text same color as background to effectively hide it
-      // If you want revealed cards to still show their team color subtly under the icon:
-      // switch (revealedCards[index]) {
-      //   case 'green': cardColor = '#a5d6a7'; break; // Lighter green
-      //   case 'assassin': cardColor = '#ef9a9a'; break; // Lighter red
-      //   case 'neutral': cardColor = '#cfd8dc'; break; // Lighter neutral
-      //   default: cardColor = '#E0E0E0'; break;
+    if (effectiveType) {
+      // Card has been revealed in some capacity (assassin, green for team, or by current clue giver)
+      // Use a generic 'flipped' background, icon will show the type.
+      cardColor = '#E0E0E0'; // Light grey for revealed cards
+      textColor = '#E0E0E0'; // Hide word text
+      // Optionally, tint background based on effectiveType if desired:
+      // switch (effectiveType) {
+      //   case 'green': cardColor = '#a5d6a7'; break; 
+      //   case 'assassin': cardColor = '#ef9a9a'; break; 
+      //   case 'neutral': cardColor = '#cfd8dc'; break;
       // }
+    } else {
+      // Card not effectively revealed for display purposes; show its keyCard color for the current player
+      if (playerKeyCard && playerKeyCard.length > index) {
+        const playerPerspectiveColor = playerKeyCard[index];
+        switch (playerPerspectiveColor) {
+          case 'green': cardColor = '#7cb342'; textColor = 'white'; break; // Player's agent
+          case 'assassin': cardColor = '#d32f2f'; textColor = 'white'; break; // Player's assassin (or shared assassin)
+          case 'neutral': cardColor = '#bdbdbd'; textColor = 'black'; break; // Neutral/Bystander
+          // 'double_agent' on the keycard from backend should appear as 'green' for this player.
+          // If the backend sends 'double_agent' directly in playerKeyCard, handle it here or ensure backend translates.
+          default: cardColor = '#FFFACD'; textColor = 'black'; break; // Default bystander/unassigned
+        }
+      } else {
+        // Fallback if playerKeyCard is not available or index is out of bounds
+        cardColor = '#FFFACD'; textColor = 'black';
+      }
     }
-    // ---- END: Updated logic for Flipped Card Appearance ----
 
-    // Apply clickable styling for the active guesser on unrevealed cards
-    if (myRole === 'guesser' && isCurrentGuesser && isGuessingActive && !revealedCards[index]) {
+    // Override cursor and border for clickable cards
+    if (isCardClickable(index)) {
       cursorStyle = 'pointer';
       borderStyle = '2px solid #2196f3'; // Blue outline to indicate clickable
-    }
-
-    // ADD THIS DEBUG LOG (EXAMPLE FOR INDEX 19)
-    if (index === 19) { // You can change this index or make it log for all
-        console.log(`WordGrid Card Index ${index}: revealed='${revealedCards[index]}', computed cardColor='${cardColor}', myRole='${myRole}', keyCard[${index}]='${keyCard[index]}'`);
     }
     
     return { 
@@ -110,11 +140,6 @@ const WordGrid: React.FC<WordGridProps> = ({
       color: textColor,
       cursor: cursorStyle,
       border: borderStyle,
-      // Ensure text for icon is visible if textColor was set to match cardColor for hiding word
-      // We can set a specific color for icons if needed, or ensure icons are distinguishable
-      // For simplicity, if icons are emojis, they often have their own color.
-      // If textColor is the same as cardColor (to hide the word), icons might need explicit styling if they are text-based.
-      // However, emojis usually render fine.
       display: 'flex',        // Keep flex for centering content (icon or word)
       alignItems: 'center',
       justifyContent: 'center'
@@ -123,12 +148,12 @@ const WordGrid: React.FC<WordGridProps> = ({
   
   // Function to handle card click
   const handleWordClick = (index: number) => {
-    if (isCurrentGuesser && isGuessingActive && !revealedCards[index]) {
-      onWordClick(index);
+    if (isCardClickable(index)) {
+      onCardClick(index);
     }
   };
   
-  if (!words || words.length === 0) {
+  if (!gridWords || gridWords.length === 0) {
     console.log('No words received in WordGrid component');
     return (
       <div style={styles.loadingContainer}>
@@ -143,17 +168,19 @@ const WordGrid: React.FC<WordGridProps> = ({
     <div>
       {/* Main Word Grid */}
       <div style={styles.gridContainer}>
-        {words.map((word, index) => (
+        {gridWords.map((word, index) => (
           <div
             key={index}
             style={getCardStyle(index)} // getCardStyle now includes icon info via data attributes or can return more complex object
             onClick={() => handleWordClick(index)}
           >
-            {/* Conditionally render word or icon based on revealed state */}
-            {revealedCards[index] 
-              ? <span style={{ fontSize: '1.5em' }}>{getIconForCardType(revealedCards[index])}</span> // Display icon if revealed
-              : word // Display word if not revealed
-            }
+            {(() => {
+              const effectiveType = getEffectiveCardTypeForDisplay(index);
+              if (effectiveType) {
+                return <span style={{ fontSize: '1.5em' }}>{getIconForCardType(effectiveType)}</span>;
+              }
+              return word;
+            })()}
           </div>
         ))}
       </div>
