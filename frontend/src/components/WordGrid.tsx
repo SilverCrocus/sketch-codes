@@ -18,6 +18,7 @@ interface WordGridProps {
 }
 
 // Add CSS animation for the spinner
+// Add CSS animation for the spinner
 const SpinnerAnimation = () => (
   <style>
     {`
@@ -101,31 +102,25 @@ const WordGrid: React.FC<WordGridProps> = ({
 
     const effectiveType = getEffectiveCardTypeForDisplay(index);
 
-    if (effectiveType) {
-      // Card has been revealed in some capacity (assassin, green for team, or by current clue giver)
-      // Use a generic 'flipped' background, icon will show the type.
+    if (effectiveType === 'green' || effectiveType === 'assassin') {
+      // Card is fully revealed as green (for a team) or assassin
       cardColor = '#E0E0E0'; // Light grey for revealed cards
-      textColor = '#E0E0E0'; // Hide word text
-      // Optionally, tint background based on effectiveType if desired:
-      // switch (effectiveType) {
-      //   case 'green': cardColor = '#a5d6a7'; break; 
-      //   case 'assassin': cardColor = '#ef9a9a'; break; 
-      //   case 'neutral': cardColor = '#cfd8dc'; break;
-      // }
+      textColor = '#E0E0E0'; // Hide word text, as icon will be shown
+    } else if (effectiveType === 'neutral') {
+      // Card was revealed as neutral by a guesser
+      cardColor = '#cfd8dc'; // A distinct neutral revealed color (e.g., blue-grey)
+      textColor = 'black';    // Ensure word text is visible
     } else {
-      // Card not effectively revealed for display purposes; show its keyCard color for the current player
+      // Card not effectively revealed for display (effectiveType is null), show its keyCard color
       if (playerKeyCard && playerKeyCard.length > index) {
         const playerPerspectiveColor = playerKeyCard[index];
         switch (playerPerspectiveColor) {
-          case 'green': cardColor = '#7cb342'; textColor = 'white'; break; // Player's agent
-          case 'assassin': cardColor = '#d32f2f'; textColor = 'white'; break; // Player's assassin (or shared assassin)
-          case 'neutral': cardColor = '#bdbdbd'; textColor = 'black'; break; // Neutral/Bystander
-          // 'double_agent' on the keycard from backend should appear as 'green' for this player.
-          // If the backend sends 'double_agent' directly in playerKeyCard, handle it here or ensure backend translates.
-          default: cardColor = '#FFFACD'; textColor = 'black'; break; // Default bystander/unassigned
+          case 'green': cardColor = '#7cb342'; textColor = 'white'; break;
+          case 'assassin': cardColor = '#d32f2f'; textColor = 'white'; break;
+          case 'neutral': cardColor = '#bdbdbd'; textColor = 'black'; break;
+          default: cardColor = '#FFFACD'; textColor = 'black'; break;
         }
       } else {
-        // Fallback if playerKeyCard is not available or index is out of bounds
         cardColor = '#FFFACD'; textColor = 'black';
       }
     }
@@ -138,6 +133,7 @@ const WordGrid: React.FC<WordGridProps> = ({
     
     return { 
       ...baseStyle, 
+      position: 'relative', // Explicitly ensure this for token positioning
       backgroundColor: cardColor,
       color: textColor,
       cursor: cursorStyle,
@@ -168,26 +164,54 @@ const WordGrid: React.FC<WordGridProps> = ({
 
   return (
     <div>
+      <style>
+        {`
+          .card-tokens-container-class {
+            position: absolute;
+            bottom: 2px; /* Reposition to bottom */
+            left: 2px;   /* Reposition to left */
+            z-index: 1;
+            display: flex;
+            gap: 2px;
+          }
+          .token-image {
+            width: 18px; /* Adjust size as needed */
+            height: 18px; /* Adjust size as needed */
+          }
+          .red-duck {
+            /* Example filter for red - tune in browser dev tools if needed */
+            filter: brightness(0) saturate(100%) invert(30%) sepia(90%) saturate(5000%) hue-rotate(350deg) brightness(100%) contrast(100%);
+          }
+          .blue-duck {
+            /* Example filter for blue - tune in browser dev tools if needed */
+            filter: brightness(0) saturate(100%) invert(50%) sepia(80%) saturate(5000%) hue-rotate(190deg) brightness(100%) contrast(100%);
+          }
+        `}
+      </style>
       {/* Main Word Grid */}
       <div style={styles.gridContainer}>
         {gridWords.map((word, index) => {
           const cardStatus = gridRevealStatus[index];
-          let tokenUrl = null;
+          let showDuckToken = false;
+          let showStarToken = false;
 
-          if (cardStatus) {
-            if (cardStatus.revealed_by_guesser_for_a) {
-              tokenUrl = duckIconUrl; // Player A's turn revealed this
-            } else if (cardStatus.revealed_by_guesser_for_b) {
-              tokenUrl = starIconUrl; // Player B's turn revealed this
+          const effectiveType = getEffectiveCardTypeForDisplay(index);
+
+          // Only show tokens if the card is not yet revealed as green or assassin
+          if (cardStatus && effectiveType !== 'green' && effectiveType !== 'assassin') {
+            if (cardStatus.revealed_by_guesser_for_a === 'neutral') {
+              showDuckToken = true; // Player A's team made an incorrect guess (neutral)
+            }
+            if (cardStatus.revealed_by_guesser_for_b === 'neutral') {
+              showStarToken = true; // Player B's team made an incorrect guess (neutral)
             }
           }
 
           // Log for debugging token display
-          console.log(
-            `[WordGrid Card ${index}] Status:`, cardStatus, 
-            `ActivePerspective: ${activeClueGiverPerspective}`, 
-            `TokenURL: ${tokenUrl}`
-          );
+          // console.log(
+          //   `[WordGrid Card ${index}] Word: ${word}, Status:`, cardStatus, 
+          //   `EffectiveType: ${effectiveType}, Duck: ${showDuckToken}, Star: ${showStarToken}`
+          // );
 
           return (
             <div
@@ -196,20 +220,18 @@ const WordGrid: React.FC<WordGridProps> = ({
               style={getCardStyle(index)} 
               onClick={() => handleWordClick(index)}
             >
-              {/* Original logic for main card type icon - assuming these helper functions exist */}
-              {(() => {
-                const effectiveType = getEffectiveCardTypeForDisplay(index);
-                if (effectiveType) {
-                  return <span className="card-type-icon" style={{ fontSize: '1.5em' }}>{getIconForCardType(effectiveType)}</span>;
-                }
-                return null;
-              })()}
+              {/* Main card type icon (green/assassin) or word text */}
+              {effectiveType && (effectiveType === 'green' || effectiveType === 'assassin') ? (
+                <span className="card-type-icon" style={{ fontSize: '1.5em' }}>{getIconForCardType(effectiveType)}</span>
+              ) : (
+                <span className="word-text">{word.toUpperCase()}</span>
+              )}
 
-              {/* Word text */}
-              <span className="word-text">{word.toUpperCase()}</span>
-
-              {/* New SVG Token for clicked status */}
-              {tokenUrl && <img src={tokenUrl} alt="token" className="clicked-svg-token" />}
+              {/* Tokens container */}
+              <div className="card-tokens-container-class">
+                {showDuckToken && <img src={duckIconUrl} alt="Red Duck Token" className="token-image red-duck" />}
+                {showStarToken && <img src={duckIconUrl} alt="Blue Duck Token" className="token-image blue-duck" />}{/* Using duckIconUrl for blue duck too */}
+              </div>
             </div>
           );
         })}
@@ -228,6 +250,7 @@ const styles: { [key: string]: React.CSSProperties } = {
   },
   gridTile: {
     display: 'flex',
+    position: 'relative', // Added for positioning context of tokens
     alignItems: 'center',
     justifyContent: 'center',
     height: '60px',
