@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import DrawingCanvas, { StrokeData } from '../components/DrawingCanvas';
+import WinModal from '../components/WinModal';
 import WordGrid from '../components/WordGrid';
 import { generateClientId } from '../utils/clientId';
 
@@ -424,7 +425,25 @@ const GamePage: React.FC = () => {
     <div>
       {!isConnected && <p>Connecting... Attempts: {reconnectAttempts}</p>}
       {isConnected && <p>Connected as: {clientId} (Role: {myRole})</p>}
-      {gameOver && <p style={{ color: 'red', fontWeight: 'bold' }}>Game Over! {winner ? `Winner: ${winner}` : "It's a draw!"}</p>}
+
+      {/* Game Over Logic */}
+      {gameOver && (
+        (winner === 'Players Win! (15 Green Words)') ? (
+          <WinModal 
+            isOpen={true} 
+            onClose={() => {
+              // navigate('/'); // Or implement rematch logic
+              console.log('WinModal closed, navigate or rematch needed');
+              // For now, just log. You'll want to navigate or reset game state.
+              setGameOver(false); // Hide modal after close for now
+              setWinner(null);
+            }} 
+            // winnerName prop removed as modal now shows a generic team win message
+          />
+        ) : (
+          <p style={{ color: 'red', fontWeight: 'bold' }}>Game Over! {winner ? `Winner: ${winner}` : "It's a draw!"}</p>
+        )
+      )}
 
       <div style={{ marginBottom: '10px' }}>
         <button onClick={() => setCurrentTool('pen')} disabled={currentTool === 'pen' || myRole !== 'drawer' || !drawingPhaseActive || drawingSubmitted}>Pen</button>
