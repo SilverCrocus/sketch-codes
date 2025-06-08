@@ -53,6 +53,7 @@ interface GameStatePayload {
   game_over?: boolean;
   winner?: string | null;
   player_identities?: { [clientId: string]: 'a' | 'b' };
+  player_cleared_opponent_board?: 'A' | 'B' | null; // Added for new feature
 }
 
 const mapBackendStrokeToFrontendStroke = (backendStroke: BackendStrokePayload): StrokeData => {
@@ -94,6 +95,7 @@ const GamePage: React.FC = () => {
   const [gridRevealStatus, setGridRevealStatus] = useState<CardRevealStatus[]>(() => Array(25).fill(null).map(() => ({ revealed_by_guesser_for_a: null, revealed_by_guesser_for_b: null })));
   const [playerType, setPlayerType] = useState<'a' | 'b' | 'spectator'>('spectator');
   const [playerIdentities, setPlayerIdentities] = useState<Record<string, 'a' | 'b'>>({});
+  const [opponentBoardClearedMessage, setOpponentBoardClearedMessage] = useState<string | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_DELAY_MS = 3000;
@@ -250,6 +252,13 @@ const GamePage: React.FC = () => {
               console.log(`[WebSocket GAME_STATE] Set playerType to: ${gameState.player_type} for client ${clientId}`);
             }
             if (gameState.player_identities) setPlayerIdentities(gameState.player_identities);
+
+            // Handle opponent board cleared message
+            if (gameState.player_cleared_opponent_board && gameState.player_cleared_opponent_board.toLowerCase() === playerType) {
+              setOpponentBoardClearedMessage("You have guessed all their cards now its just your cards that remain");
+            } else {
+              setOpponentBoardClearedMessage(null); // Clear message if flag not present or not for this player
+            }
             break;
           case 'GAME_NOT_FOUND':
             alert(`Error: Game '${gameId}' not found. ${message.payload?.message || ''}`);
@@ -423,6 +432,11 @@ const GamePage: React.FC = () => {
 
   return (
     <div>
+      {opponentBoardClearedMessage && 
+        <p style={{ backgroundColor: 'lightblue', padding: '10px', textAlign: 'center', fontWeight: 'bold' }}>
+          {opponentBoardClearedMessage}
+        </p>
+      }
       {!isConnected && <p>Connecting... Attempts: {reconnectAttempts}</p>}
       {isConnected && <p>Connected as: {clientId} (Role: {myRole})</p>}
 

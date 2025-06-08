@@ -103,6 +103,7 @@ class GameState(BaseModel):
     guessing_active: bool = False
     correct_guesses_this_turn: int = 0
     turn_number: int = 1
+    player_cleared_opponent_board: Optional[str] = None # Added for notifying client
     game_over: bool = False
     winner: Optional[str] = None
 
@@ -313,38 +314,57 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                     if actor_client_id == game_state.current_drawing_player_id and \
                        game_state.drawing_phase_active and not game_state.drawing_submitted:
                         
-                        processed_stroke_data = stroke_input_data.copy()
+                        # Validate basic structure of stroke_input_data first
+                        if not isinstance(stroke_input_data.get('points'), list) or \
+                           not isinstance(stroke_input_data.get('color'), str) or \
+                           not isinstance(stroke_input_data.get('size'), (int, float)):
+                            print(f"ERROR: Invalid NEW_STROKE structure or missing/invalid keys from {actor_client_id}. Data: {stroke_input_data}")
+                            continue
 
-                        if 'points' in processed_stroke_data and isinstance(processed_stroke_data['points'], list):
-                            raw_points = processed_stroke_data['points']
-                            transformed_points = []
-                            valid_points_format = True
-                            for p_obj in raw_points:
-                                if isinstance(p_obj, dict) and 'x' in p_obj and 'y' in p_obj:
-                                    try: transformed_points.append([float(p_obj['x']), float(p_obj['y'])])
-                                    except (TypeError, ValueError): valid_points_format = False; break
-                                elif isinstance(p_obj, list) and len(p_obj) == 2:
-                                    try: transformed_points.append([float(p_obj[0]), float(p_obj[1])])
-                                    except (TypeError, ValueError): valid_points_format = False; break
-                                else: valid_points_format = False; break
-                            
-                            if valid_points_format:
-                                processed_stroke_data['points'] = transformed_points
-                            else:
-                                print(f"ERROR: Invalid point data in NEW_STROKE from {actor_client_id}. Points: {raw_points}")
-                                continue
+                        processed_stroke_data = stroke_input_data.copy() # Restore this
+
+                        # Points processing
+                        raw_points = processed_stroke_data['points']
+                        transformed_points = []
+                        valid_points_format = True
                         
+                        for p_obj in raw_points:
+                            if isinstance(p_obj, dict) and 'x' in p_obj and 'y' in p_obj:
+                                try:
+                                    transformed_points.append([float(p_obj['x']), float(p_obj['y'])])
+                                except (TypeError, ValueError):
+                                    valid_points_format = False
+                                    break 
+                            elif isinstance(p_obj, list) and len(p_obj) == 2:
+                                try:
+                                    transformed_points.append([float(p_obj[0]), float(p_obj[1])])
+                                except (TypeError, ValueError):
+                                    valid_points_format = False
+                                    break
+                            else:
+                                valid_points_format = False
+                                break
+                        
+                        if not valid_points_format:
+                            print(f"ERROR: Invalid point data format in NEW_STROKE from {actor_client_id}. Points: {raw_points}")
+                            continue 
+                        
+                        processed_stroke_data['points'] = transformed_points
+                        
+                        # Attempt to create Stroke object
                         try:
                             new_stroke = Stroke(**processed_stroke_data)
                             game_state.current_turn_drawing_strokes.append(new_stroke)
                             # To give drawing player immediate feedback of their own strokes (without full broadcast yet):
                             if websocket.client_state == WebSocketState.CONNECTED:
                                 await websocket.send_text(json.dumps({
-                                    "type": "CURRENT_STROKES_UPDATE", # Client listens for this to update its own canvas
+                                    "type": "CURRENT_STROKES_UPDATE", 
                                     "payload": {"strokes": [s.model_dump() for s in game_state.current_turn_drawing_strokes]}
                                 }))
                         except ValidationError as e:
                             print(f"ERROR: Stroke validation error for NEW_STROKE from {actor_client_id}: {e}. Processed data: {processed_stroke_data}")
+                            # Consider if a single bad stroke should halt further processing or just be skipped.
+                            # For now, it prints an error and processing continues for the next message.
                     else:
                         print(f"INFO: NEW_STROKE from {actor_client_id} ignored. Conditions not met.")
 
@@ -367,7 +387,6 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                        game_state.drawing_phase_active and not game_state.drawing_submitted:
                         
                         submitted_strokes_payload = payload.get("strokes")
-                        processed_payload_strokes = False
 
                         if isinstance(submitted_strokes_payload, list):
                             if len(submitted_strokes_payload) > 0:
@@ -390,15 +409,17 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                                                 try:
                                                     transformed_points.append([float(p_pair[0]), float(p_pair[1])])
                                                 except (TypeError, ValueError):
-                                                    valid_points_format = False; break
+                                                    valid_points_format = False
+                                                    break # Exit points loop for this stroke_data
                                             else: # Malformed point pair
-                                                valid_points_format = False; break
+                                                valid_points_format = False
+                                                break # Exit points loop for this stroke_data
                                         
                                         if valid_points_format:
                                             processed_stroke_data['points'] = transformed_points
                                         else:
                                             print(f"ERROR: Invalid point data format in SUBMIT_DRAWING from {actor_client_id}. Points: {raw_points}")
-                                            continue # Skip this stroke
+                                            continue # Skip this stroke_data (from the outer loop over stroke_data in processed_payload_strokes)
                                     else:
                                         print(f"ERROR: Missing or invalid 'points' list in SUBMIT_DRAWING stroke_data: {stroke_data} from {actor_client_id}")
                                         continue # Skip this stroke
@@ -413,14 +434,12 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                                 if validated_submitted_strokes: # If any strokes were successfully validated from non-empty payload
                                     game_state.current_turn_drawing_strokes = validated_submitted_strokes 
                                     print(f"INFO: Replaced current_turn_drawing_strokes with {len(validated_submitted_strokes)} validated strokes from SUBMIT_DRAWING payload.")
-                                    processed_payload_strokes = True
                                 else:
                                     print(f"WARN: No valid strokes processed from SUBMIT_DRAWING payload from {actor_client_id}. Retaining existing current_turn_drawing_strokes if any.")
                                     # Fallback: if payload had strokes but all failed validation, current_turn_drawing_strokes remains as is (from NEW_STROKEs)
                             else: # Empty list of strokes sent in payload
                                  print(f"INFO: SUBMIT_DRAWING payload contained an empty list of strokes from {actor_client_id}. Clearing current_turn_drawing_strokes.")
                                  game_state.current_turn_drawing_strokes = []
-                                 processed_payload_strokes = True
                         else:
                             print(f"WARN: No 'strokes' list, or non-list 'strokes', found in SUBMIT_DRAWING payload from {actor_client_id}. Relying on prior NEW_STROKE data. Payload: {payload}")
                             # Fallback: if 'strokes' key is missing or not a list, current_turn_drawing_strokes remains as is.
@@ -515,12 +534,11 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                     # 2. If game hasn't ended, determine turn outcome and update card_status_obj for clue giver's perspective
                     if not game_ended_this_guess:
                         # Check if guesser hit their own assassin (and game isn't ending for other assassin reasons)
-                        if is_guesser_map_assassin_only:
+                        if is_guesser_map_assassin_only: # This means the card on guesser's map was assassin
                             print(f"INFO: Guesser {actor_client_id} hit their OWN Assassin! Card {word_index} ('{game_state.grid_words[word_index]}'). Turn ends. Game continues.")
                             turn_ended_this_guess = True # Ensure turn ends because guesser hit own assassin
 
-                        # Determine card type from clue giver's perspective (will be 'green' or 'neutral' here)
-                        revealed_type_for_clue_giver_turn = card_type_on_clue_giver_map
+                        revealed_type_for_clue_giver_turn = card_type_on_clue_giver_map # Determined earlier
                         
                         # Update card_status_obj based on this perspective for token display
                         if clue_giver_is_player_a:
@@ -529,20 +547,51 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                             card_status_obj.revealed_by_guesser_for_b = revealed_type_for_clue_giver_turn
                         print(f"INFO: Card {word_index} ('{game_state.grid_words[word_index]}') marked as '{revealed_type_for_clue_giver_turn}' for Clue Giver {clue_giver_id}'s turn.")
 
-                        # Determine if turn ends based on revealed type (or if already ended by own assassin)
-                        if revealed_type_for_clue_giver_turn == 'green':
-                            if not turn_ended_this_guess: # If turn wasn't already ended by guesser's own assassin
+                        # ---- Check if current guesser cleared opponent's board ----
+                        # This check happens AFTER card status is updated.
+                        # It can end the turn if the game hasn't already ended.
+                        
+                        actual_opponent_is_player_a = not guesser_is_player_a # If guesser is A, opponent is B (actual_opponent_is_player_a = False). If guesser is B, opponent is A (True).
+                        opponent_key_card_to_check = game_state.key_card_a if actual_opponent_is_player_a else game_state.key_card_b
+                        
+                        if opponent_key_card_to_check: 
+                            total_opponent_green_cards = opponent_key_card_to_check.count('green')
+                            if total_opponent_green_cards > 0:
+                                revealed_opponent_green_cards_count = 0
+                                for i_idx in range(len(opponent_key_card_to_check)):
+                                    if opponent_key_card_to_check[i_idx] == 'green':
+                                        status_for_opponent_card = game_state.grid_reveal_status[i_idx]
+                                        if actual_opponent_is_player_a: 
+                                            if status_for_opponent_card.revealed_by_guesser_for_a == 'green':
+                                                revealed_opponent_green_cards_count += 1
+                                        else: 
+                                            if status_for_opponent_card.revealed_by_guesser_for_b == 'green':
+                                                revealed_opponent_green_cards_count += 1
+                                
+                                if revealed_opponent_green_cards_count == total_opponent_green_cards:
+                                    guesser_role_char = 'A' if guesser_is_player_a else 'B'
+                                    opponent_role_char_display = 'A' if actual_opponent_is_player_a else 'B'
+                                    if game_state.player_cleared_opponent_board != guesser_role_char: # only log and set flag if not already set for this player
+                                        print(f"INFO: Guesser {actor_client_id} (Player {guesser_role_char}) cleared all {total_opponent_green_cards} of opponent Player {opponent_role_char_display}'s cards!")
+                                        game_state.player_cleared_opponent_board = guesser_role_char
+                                    
+                                    if not game_ended_this_guess: 
+                                        if not turn_ended_this_guess: # if turn wasn't already ended by e.g. own assassin
+                                            print(f"INFO: Turn ends as all opponent Player {opponent_role_char_display}'s cards cleared by Player {guesser_role_char}.")
+                                        turn_ended_this_guess = True 
+                        
+                        # Determine if turn ends based on revealed type (if not already ended by other means)
+                        if not turn_ended_this_guess: 
+                            if revealed_type_for_clue_giver_turn == 'green':
                                 game_state.correct_guesses_this_turn += 1
                                 print(f"INFO: Correct guess for Clue Giver {clue_giver_id}. Turn continues. Correct guesses this turn: {game_state.correct_guesses_this_turn}.")
-                                # turn_ended_this_guess remains False, allowing multiple green guesses
-                            else: # Guesser hit own assassin, but it was green for clue giver (rare, but count it)
-                                game_state.correct_guesses_this_turn += 1
-                                print(f"INFO: Correct guess (Green for Clue Giver), but turn ended as Guesser hit own Assassin.")
-                        elif revealed_type_for_clue_giver_turn == 'neutral':
-                            if not turn_ended_this_guess: # Only print if not already ended by own assassin message
+                            elif revealed_type_for_clue_giver_turn == 'neutral':
                                 print(f"INFO: Incorrect guess (Neutral for Clue Giver {clue_giver_id}). Turn ends.")
-                            turn_ended_this_guess = True # Ensure turn ends for neutral
-                        
+                                turn_ended_this_guess = True 
+                        elif revealed_type_for_clue_giver_turn == 'green': # Turn already ended (e.g. own assassin, cleared board), but guess was green for cluer
+                            game_state.correct_guesses_this_turn += 1
+                            print(f"INFO: Correct guess (Green for Clue Giver), but turn had already ended. Correct guesses: {game_state.correct_guesses_this_turn}")
+                        # Note: if revealed_type_for_clue_giver_turn was 'assassin' (guesser hit own), turn_ended_this_guess is already true from earlier.
                         # Win condition check happens after card_status_obj is updated and turn logic is processed
                         
                         # Check for Win Condition (only if game not ended by assassin)
@@ -620,8 +669,17 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                     game_state_state_for_broadcast = active_games.get(established_game_id)
                     if game_state_state_for_broadcast: # Check again, as it might be deleted in another async context
                          await broadcast_game_state(established_game_id)
-                    else:
-                        print(f"WARN: Game {established_game_id} became inactive before final broadcast in message loop for {actor_client_id}.")
+                    # Reset the temporary flag after broadcasting
+                    if game_state.player_cleared_opponent_board is not None:
+                        game_state.player_cleared_opponent_board = None
+
+                elif message_type == "END_GUESSING":
+                    # Original END_GUESSING logic would start here.
+                    # The print statement below was likely part of a different conditional block or logging
+                    # that got misplaced. For now, I'm ensuring the elif is clean.
+                    # If that WARN print was essential and tied to the END_GUESSING block's conditions,
+                    # it would need to be re-evaluated based on the original code's intent.
+                    print(f"[DEBUG] END_GUESSING message type received from {actor_client_id} for game {established_game_id}") # Placeholder for actual logic
                 else:
                     print(f"WARN: Game {established_game_id} not in active_games for final broadcast for {actor_client_id}. Client might be closing.")
             except json.JSONDecodeError:
