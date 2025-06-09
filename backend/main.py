@@ -104,6 +104,7 @@ class GameState(BaseModel):
     correct_guesses_this_turn: int = 0
     turn_number: int = 1
     player_cleared_opponent_board: Optional[str] = None # Added for notifying client
+    all_agents_found_message: Optional[str] = None # Notify when a player finds all their own agent cards
     game_over: bool = False
     winner: Optional[str] = None
 
@@ -473,6 +474,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                         continue
                     clue_giver_id = game_state.current_drawing_player_id
                     card_status_obj = game_state.grid_reveal_status[word_index]
+                    message_was_just_set_this_guess = False # Initialize flag
 
                     guesser_is_player_a = (actor_client_id == game_state.player_a_id)
                     clue_giver_is_player_a = (clue_giver_id == game_state.player_a_id)
@@ -514,6 +516,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                     if is_double_assassin:
                         print(f"GAME_OVER: Double Assassin! Card {word_index} ('{game_state.grid_words[word_index]}'). Game {established_game_id}.")
                         game_state.game_over = True
+                        game_state.all_agents_found_message = None
                         game_state.winner = "Players Lose! (Double Assassin)"
                         card_status_obj.revealed_by_guesser_for_a = 'assassin' # Mark for both perspectives
                         card_status_obj.revealed_by_guesser_for_b = 'assassin'
@@ -523,6 +526,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                     elif is_clue_giver_map_assassin_only: # Clue giver's map is assassin (and not a double)
                         print(f"GAME_OVER: Guesser {actor_client_id} revealed Clue Giver {clue_giver_id}'s Assassin! Card {word_index} ('{game_state.grid_words[word_index]}'). Game {established_game_id}.")
                         game_state.game_over = True
+                        game_state.all_agents_found_message = None
                         game_state.winner = "Players Lose! (Assassin Revealed)"
                         if clue_giver_is_player_a:
                             card_status_obj.revealed_by_guesser_for_a = 'assassin'
@@ -546,6 +550,59 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                         else:
                             card_status_obj.revealed_by_guesser_for_b = revealed_type_for_clue_giver_turn
                         print(f"INFO: Card {word_index} ('{game_state.grid_words[word_index]}') marked as '{revealed_type_for_clue_giver_turn}' for Clue Giver {clue_giver_id}'s turn.")
+
+                        # ---- Check if GUESSER found all of DRAWER'S green cards ----
+                        # This check runs if the current guess was green on the DRAWER's map (a correct guess for the turn)
+                        # and the game hasn't ended for other reasons (e.g., assassin).
+                        if card_type_on_clue_giver_map == "green" and not game_ended_this_guess:
+                            drawer_id = game_state.current_drawing_player_id
+                            guesser_id = actor_client_id # actor_client_id is the guesser
+
+                            drawer_is_player_a = (drawer_id == game_state.player_a_id)
+                            drawer_key_card = game_state.key_card_a if drawer_is_player_a else game_state.key_card_b
+                            
+                            drawer_char = "Unknown"
+                            # The 'other_player_char' in the message will be the current guesser.
+                            other_player_char_for_message = "Unknown" 
+
+                            if game_state.player_a_id == drawer_id:
+                                drawer_char = "A"
+                                if game_state.player_b_id == guesser_id:
+                                    other_player_char_for_message = "B"
+                            elif game_state.player_b_id == drawer_id:
+                                drawer_char = "B"
+                                if game_state.player_a_id == guesser_id:
+                                    other_player_char_for_message = "A"
+
+                            if drawer_char != "Unknown" and other_player_char_for_message != "Unknown":
+                                # TOTAL_GREEN_CARDS_PER_PLAYER is assumed to be 9, representing the number of agents
+                                # the drawer wants the guesser to find on their map.
+                                TOTAL_GREEN_CARDS_PER_PLAYER = 9 
+
+                                revealed_drawer_green_cards = 0
+                                print(f"DEBUG: Checking if all DRAWER ({drawer_char}) green cards revealed by GUESSER ({other_player_char_for_message}).")
+                                for i in range(len(game_state.grid_words)):
+                                    card_is_green_on_drawer_map = (drawer_key_card[i] == "green")
+                                    
+                                    card_i_is_revealed_at_all = (
+                                        game_state.grid_reveal_status[i].revealed_by_guesser_for_a is not None or
+                                        game_state.grid_reveal_status[i].revealed_by_guesser_for_b is not None
+                                    )
+                                    
+                                    # Detailed log for each card being checked against drawer's map
+                                    # print(f"DEBUG DRAWER COUNT (Card {i}, Word '{game_state.grid_words[i]}'): IsGreenOnDrawerMap={card_is_green_on_drawer_map}, RevealStatusA={game_state.grid_reveal_status[i].revealed_by_guesser_for_a}, RevealStatusB={game_state.grid_reveal_status[i].revealed_by_guesser_for_b}, IsRevealedAtAll={card_i_is_revealed_at_all}")
+                                    if card_is_green_on_drawer_map and card_i_is_revealed_at_all:
+                                        revealed_drawer_green_cards += 1
+                                        # print(f"DEBUG DRAWER COUNT: Card {i} ('{game_state.grid_words[i]}') COUNTED for drawer. New total: {revealed_drawer_green_cards}")
+                                
+                                print(f"DEBUG CHECK (DRAWER): revealed_drawer_green_cards = {revealed_drawer_green_cards}, TARGET = {TOTAL_GREEN_CARDS_PER_PLAYER}")
+                                print(f"DEBUG CHECK (DRAWER): game_state.all_agents_found_message before check is: '{game_state.all_agents_found_message}'")
+                                if revealed_drawer_green_cards == TOTAL_GREEN_CARDS_PER_PLAYER:
+                                    if game_state.all_agents_found_message is None:
+                                        game_state.all_agents_found_message = f"Great work! All agent cards for Player {drawer_char} have been found. Only Player {other_player_char_for_message}'s agent cards remain."
+                                        message_was_just_set_this_guess = True
+                                        print(f"INFO: Game {established_game_id}: All {TOTAL_GREEN_CARDS_PER_PLAYER} agent cards for DRAWER Player {drawer_char} found by Guesser Player {other_player_char_for_message}. Message set and flag 'message_was_just_set_this_guess' is True.")
+                            # This message is not cleared here by this specific logic block; it persists until a turn change or game end, handled elsewhere.
 
                         # ---- Check if current guesser cleared opponent's board ----
                         # This check happens AFTER card status is updated.
@@ -613,6 +670,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                         if revealed_as_green_count >= 15:
                             print(f"GAME_OVER: Players WIN! {revealed_as_green_count} green words identified. Game {established_game_id}.")
                             game_state.game_over = True
+                            game_state.all_agents_found_message = None
                             game_state.winner = "Players Win! (15 Green Words)"
                             game_ended_this_guess = True
                             turn_ended_this_guess = True
@@ -636,6 +694,11 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                         game_state.current_turn_drawing_strokes.clear() # Clear any strokes from the concluded turn
                         game_state.turn_number += 1
                         game_state.correct_guesses_this_turn = 0
+                        if not message_was_just_set_this_guess:
+                            game_state.all_agents_found_message = None # Clear message only if not just set
+                            print("INFO: Clearing all_agents_found_message because it was not set in this guess cycle.")
+                        else:
+                            print("INFO: Preserving all_agents_found_message as it was set in this guess cycle.")
                         print(f"INFO: New turn {game_state.turn_number} after GUESS_WORD. Drawer: {game_state.current_drawing_player_id}, Guesser: {game_state.current_guessing_player_id}. Canvas cleared. Display overrides cleared.")
                     # If neither game_ended_this_guess nor turn_ended_this_guess is true, it means a correct green guess was made
                     # and the turn continues. In this case, display_override should persist for the current turn.
@@ -661,6 +724,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                         game_state.current_turn_drawing_strokes.clear() # Clear any strokes from the current turn
                         game_state.turn_number += 1
                         game_state.correct_guesses_this_turn = 0
+                        game_state.all_agents_found_message = None # Clear any previous 'all agents found' message
                         
                         print(f"INFO: New turn {game_state.turn_number} initiated by END_GUESSING. Drawer: {game_state.current_drawing_player_id}, Guesser: {game_state.current_guessing_player_id}. Canvas cleared. Display overrides cleared.")
                 
@@ -668,6 +732,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id_path: str, client_id_
                 if established_game_id in active_games: # Ensure game still exists
                     game_state_state_for_broadcast = active_games.get(established_game_id)
                     if game_state_state_for_broadcast: # Check again, as it might be deleted in another async context
+                         print(f"DEBUG: Broadcasting game state after GUESS_WORD/END_GUESSING (or other state change). all_agents_found_message = '{game_state_state_for_broadcast.all_agents_found_message}'")
                          await broadcast_game_state(established_game_id)
                     # Reset the temporary flag after broadcasting
                     if game_state.player_cleared_opponent_board is not None:

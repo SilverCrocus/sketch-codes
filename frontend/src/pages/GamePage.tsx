@@ -54,6 +54,7 @@ interface GameStatePayload {
   winner?: string | null;
   player_identities?: { [clientId: string]: 'a' | 'b' };
   player_cleared_opponent_board?: 'A' | 'B' | null; // Added for new feature
+  all_agents_found_message?: string | null; // Message when a player finds all their agents
 }
 
 const mapBackendStrokeToFrontendStroke = (backendStroke: BackendStrokePayload): StrokeData => {
@@ -96,6 +97,7 @@ const GamePage: React.FC = () => {
   const [playerType, setPlayerType] = useState<'a' | 'b' | 'spectator'>('spectator');
   const [playerIdentities, setPlayerIdentities] = useState<Record<string, 'a' | 'b'>>({});
   const [opponentBoardClearedMessage, setOpponentBoardClearedMessage] = useState<string | null>(null);
+  const [allAgentsFoundMessage, setAllAgentsFoundMessage] = useState<string | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_DELAY_MS = 3000;
@@ -196,6 +198,7 @@ const GamePage: React.FC = () => {
               setKeyCardB(initialPayload.key_card_b);
               console.log('[WebSocket INITIAL_GAME_DATA] Set keyCardB:', initialPayload.key_card_b.length > 0 ? initialPayload.key_card_b[0] : 'empty_or_short');
             }
+            setAllAgentsFoundMessage(initialPayload.all_agents_found_message || null);
             break;
           case 'STROKE_DRAWN':
             if (message.payload && message.senderClientId !== clientId) {
@@ -259,6 +262,7 @@ const GamePage: React.FC = () => {
             } else {
               setOpponentBoardClearedMessage(null); // Clear message if flag not present or not for this player
             }
+            setAllAgentsFoundMessage(gameState.all_agents_found_message || null);
             break;
           case 'GAME_NOT_FOUND':
             alert(`Error: Game '${gameId}' not found. ${message.payload?.message || ''}`);
@@ -432,6 +436,12 @@ const GamePage: React.FC = () => {
 
   return (
     <div>
+      {/* Display message if opponent's board is cleared */}
+      {allAgentsFoundMessage && (
+        <div className="all-agents-found-notification" style={{ backgroundColor: 'lightgreen', color: 'black', padding: '10px', textAlign: 'center', fontWeight: 'bold', margin: '10px 0' }}>
+          {allAgentsFoundMessage}
+        </div>
+      )}
       {opponentBoardClearedMessage && 
         <p style={{ backgroundColor: 'lightblue', padding: '10px', textAlign: 'center', fontWeight: 'bold' }}>
           {opponentBoardClearedMessage}
