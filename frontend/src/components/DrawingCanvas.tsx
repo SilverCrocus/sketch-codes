@@ -19,11 +19,11 @@ export interface DrawingCanvasProps {
   onDrawEnd: (newStroke: Omit<StrokeData, 'id' | 'clientId'>) => void; 
   isDrawingEnabled: boolean;
   currentTool: 'pen' | 'eraser'; // Added currentTool prop
+  selectedColor: string; // NEW: Color for the pen
+  selectedBrushSize: number; // NEW: Size for pen and eraser
   // If you have onDrawStart and onDrawMove, their signatures might need tool info too
   // onDrawStart?: (point: { x: number; y: number }) => void;
   // onDrawMove?: (point: { x: number; y: number }) => void;
-  strokeColor?: string; // Assuming color is managed outside or fixed for now
-  strokeWidth?: number; // Assuming width is managed outside or fixed for now
 }
 
 const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
@@ -33,8 +33,8 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   onDrawEnd,
   isDrawingEnabled,
   currentTool,
-  strokeColor = '#000000', // Default color if not passed
-  strokeWidth = 5,      // Default width if not passed
+  selectedColor,      // No default, passed from GamePage
+  selectedBrushSize,  // No default, passed from GamePage
 }) => {
   const [isPainting, setIsPainting] = useState(false);
   const [currentPoints, setCurrentPoints] = useState<number[]>([]);
@@ -67,8 +67,8 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     if (currentPoints.length > 0) {
       onDrawEnd({
         points: currentPoints,
-        color: currentTool === 'eraser' ? '#ffffff' : strokeColor, // Eraser 'color' is arbitrary for destination-out
-        width: strokeWidth,
+        color: currentTool === 'eraser' ? '#ffffff' : selectedColor, // Eraser 'color' is arbitrary for destination-out
+        width: selectedBrushSize,
         tool: currentTool,
       });
     }
@@ -106,8 +106,8 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
         {isPainting && currentPoints.length > 0 && (
           <KonvaLine
             points={currentPoints}
-            stroke={currentTool === 'eraser' ? '#ffffff' : strokeColor}
-            strokeWidth={strokeWidth}
+            stroke={currentTool === 'eraser' ? '#ffffff' : selectedColor}
+            strokeWidth={selectedBrushSize}
             tension={0.5}
             lineCap="round"
             lineJoin="round"

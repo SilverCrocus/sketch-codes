@@ -5,6 +5,23 @@ import WinModal from '../components/WinModal';
 import WordGrid from '../components/WordGrid';
 import { generateClientId } from '../utils/clientId';
 
+// Define colors and sizes (can be moved to a constants file later)
+const PREDEFINED_COLORS = [
+  { name: 'Black', value: '#000000' },
+  { name: 'Red', value: '#FF0000' },
+  { name: 'Blue', value: '#0000FF' },
+  { name: 'Green', value: '#008000' },
+  { name: 'Yellow', value: '#FFFF00' },
+  // Add more colors if desired
+];
+
+const BRUSH_SIZES = [
+  { name: 'Small', value: 2 },
+  { name: 'Medium', value: 5 },
+  { name: 'Large', value: 10 },
+  { name: 'X-Large', value: 20 },
+];
+
 interface BackendStrokePayload {
   id: string;
   points: number[][];
@@ -98,6 +115,8 @@ const GamePage: React.FC = () => {
   const [playerIdentities, setPlayerIdentities] = useState<Record<string, 'a' | 'b'>>({});
   const [opponentBoardClearedMessage, setOpponentBoardClearedMessage] = useState<string | null>(null);
   const [allAgentsFoundMessage, setAllAgentsFoundMessage] = useState<string | null>(null);
+  const [selectedColor, setSelectedColor] = useState<string>(PREDEFINED_COLORS[0].value);
+  const [selectedBrushSize, setSelectedBrushSize] = useState<number>(BRUSH_SIZES[1].value);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_DELAY_MS = 3000;
@@ -477,6 +496,54 @@ const GamePage: React.FC = () => {
         {myRole === 'drawer' && <span> Tool: {currentTool} </span>}
       </div>
 
+      {/* Color and Brush Size Controls */}
+      {myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted && (
+        <>
+          <div style={{ marginBottom: '10px', marginTop: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span>Color:</span>
+            {PREDEFINED_COLORS.map(color => (
+              <button
+                key={color.value}
+                onClick={() => setSelectedColor(color.value)}
+                style={{
+                  backgroundColor: color.value,
+                  width: '25px',
+                  height: '25px',
+                  border: selectedColor === color.value ? '3px solid darkgrey' : '1px solid lightgrey',
+                  borderRadius: '50%',
+                  cursor: 'pointer',
+                  padding: 0,
+                  outline: 'none',
+                  boxShadow: selectedColor === color.value ? '0 0 5px rgba(0,0,0,0.5)' : 'none',
+                }}
+                title={color.name}
+                disabled={myRole !== 'drawer' || !drawingPhaseActive || drawingSubmitted}
+              />
+            ))}
+          </div>
+          <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span>Size:</span>
+            {BRUSH_SIZES.map(size => (
+              <button
+                key={size.name}
+                onClick={() => setSelectedBrushSize(size.value)}
+                style={{
+                  border: selectedBrushSize === size.value ? '2px solid blue' : '1px solid grey',
+                  padding: '5px 8px',
+                  minWidth: '60px',
+                  cursor: 'pointer',
+                  borderRadius: '4px',
+                  fontWeight: selectedBrushSize === size.value ? 'bold' : 'normal',
+                }}
+                disabled={myRole !== 'drawer' || !drawingPhaseActive || drawingSubmitted}
+              >
+                {size.name} ({size.value}px)
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '20px' }}>
         <WordGrid 
           gridWords={gridWords} // Corrected prop name
@@ -499,8 +566,8 @@ const GamePage: React.FC = () => {
           height={600}
           isDrawingEnabled={isConnected && myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted}
           currentTool={currentTool}
-          strokeColor={'#000000'}
-          strokeWidth={5}
+          selectedColor={selectedColor}
+          selectedBrushSize={selectedBrushSize}
         />
       </div>
       
