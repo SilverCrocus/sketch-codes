@@ -43,7 +43,7 @@ const HomePage: React.FC = () => {
   };
 
   return (
-    <div style={{ textAlign: 'center', marginTop: '50px' }}>
+    <div className="bg-red-500 min-h-screen flex flex-col items-center justify-center">
       <h1>Welcome to Sketch-Codes!</h1>
       <p>Get ready to draw and guess with a friend.</p>
       <button 
