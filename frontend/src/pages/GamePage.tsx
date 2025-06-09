@@ -22,6 +22,9 @@ const BRUSH_SIZES = [
   { name: 'X-Large', value: 20 },
 ];
 
+const MIN_BRUSH_SIZE = 1;
+const MAX_BRUSH_SIZE = 50; // Max brush/eraser size for the slider
+
 interface BackendStrokePayload {
   id: string;
   points: number[][];
@@ -540,6 +543,23 @@ const GamePage: React.FC = () => {
                 {size.name} ({size.value}px)
               </button>
             ))}
+          </div>
+          {/* Slider for Brush/Eraser Size */}
+          <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px', padding: '0 10px' }}>
+            <label htmlFor="brushSizeSlider" style={{ whiteSpace: 'nowrap', marginRight: '5px', fontSize: '0.9em' }}>
+              Size: {selectedBrushSize}px
+            </label>
+            <input
+              type="range"
+              id="brushSizeSlider"
+              min={MIN_BRUSH_SIZE}
+              max={MAX_BRUSH_SIZE}
+              value={selectedBrushSize}
+              onChange={(e) => setSelectedBrushSize(parseInt(e.target.value, 10))}
+              disabled={myRole !== 'drawer' || !drawingPhaseActive || drawingSubmitted}
+              style={{ flexGrow: 1, cursor: 'pointer' }}
+              title={`Brush/Eraser Size: ${selectedBrushSize}px`}
+            />
           </div>
         </>
       )}
