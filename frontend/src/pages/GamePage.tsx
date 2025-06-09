@@ -138,6 +138,7 @@ const GamePage: React.FC = () => {
   };
 
   console.log('[GamePage Render] playerType:', playerType, 'keyCardA:', keyCardA.length > 0 ? keyCardA[0] : 'empty', 'keyCardB:', keyCardB.length > 0 ? keyCardB[0] : 'empty');
+  console.log('[GamePage Render] allAgentsFoundMessage STATE IS:', allAgentsFoundMessage);
 
   const myRole = React.useMemo(() => {
     if (!clientId) return 'connecting';
@@ -262,6 +263,7 @@ const GamePage: React.FC = () => {
             } else {
               setOpponentBoardClearedMessage(null); // Clear message if flag not present or not for this player
             }
+            console.log("[WebSocket Handler] gameState.all_agents_found_message IS:", gameState.all_agents_found_message);
             setAllAgentsFoundMessage(gameState.all_agents_found_message || null);
             break;
           case 'GAME_NOT_FOUND':

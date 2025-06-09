@@ -161,6 +161,7 @@ async def broadcast_game_state(game_id: str):
         "winner": game_state.winner,
         "player_identities": player_identities,
         "connected_client_ids": connected_client_ids,
+        "all_agents_found_message": game_state.all_agents_found_message, # <<< ADDED THIS LINE
         # Send current turn drawing strokes only if drawing isn't submitted yet
         "current_turn_drawing_strokes": [s.model_dump() for s in game_state.current_turn_drawing_strokes] if not game_state.drawing_submitted else []
     }
