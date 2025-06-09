@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { SketchPicker, ColorResult } from 'react-color';
 import DrawingCanvas, { StrokeData } from '../components/DrawingCanvas';
 import WinModal from '../components/WinModal';
 import WordGrid from '../components/WordGrid';
@@ -120,11 +121,12 @@ const GamePage: React.FC = () => {
   const [allAgentsFoundMessage, setAllAgentsFoundMessage] = useState<string | null>(null);
   const [selectedColor, setSelectedColor] = useState<string>(PREDEFINED_COLORS[0].value);
   const [selectedBrushSize, setSelectedBrushSize] = useState<number>(BRUSH_SIZES[1].value);
+  const [displayColorPicker, setDisplayColorPicker] = useState(false);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_DELAY_MS = 3000;
 
-  
+  // ... rest of the code ...
 
   const handleWordCardClick = (index: number) => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
@@ -523,6 +525,65 @@ const GamePage: React.FC = () => {
                 disabled={myRole !== 'drawer' || !drawingPhaseActive || drawingSubmitted}
               />
             ))}
+            {/* Custom Color Picker Trigger */}
+            <div style={{ position: 'relative', marginLeft: '10px' }}>
+              <div
+                style={{
+                  padding: '5px',
+                  background: '#fff',
+                  borderRadius: '4px', // Rounded corners for the swatch container
+                  boxShadow: '0 0 0 1px rgba(0,0,0,.1)',
+                  display: 'inline-block',
+                  cursor: (isConnected && myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted) ? 'pointer' : 'not-allowed',
+                  opacity: (isConnected && myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted) ? 1 : 0.5,
+                }}
+                onClick={() => {
+                  if (isConnected && myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted) {
+                    setDisplayColorPicker(!displayColorPicker);
+                  }
+                }}
+                title="Select custom color"
+              >
+                <div
+                  style={{
+                    width: '30px', // Slightly larger swatch
+                    height: '20px',
+                    borderRadius: '2px',
+                    background: selectedColor,
+                    border: '1px solid #eee',
+                  }}
+                />
+              </div>
+              {displayColorPicker && (
+                <div style={{ position: 'absolute', zIndex: 100, top: 'calc(100% + 5px)', left: '50%', transform: 'translateX(-50%)' }}> {/* Popover style */}
+                  {/* Cover to close picker on outside click - TEMPORARILY COMMENTED OUT FOR DEBUGGING
+                  <div
+                    style={{ position: 'fixed', top: '0px', right: '0px', bottom: '0px', left: '0px', zIndex: 99 }}
+                    onClick={() => setDisplayColorPicker(false)}
+                  />
+                  */}
+                  <SketchPicker
+                    color={selectedColor}
+                    onChange={(color: ColorResult) => {
+                      console.log('SketchPicker onChange:', color.hex);
+                      setSelectedColor(color.hex);
+                    }}
+                    disableAlpha // Assuming no transparency needed for strokes
+                    presetColors={[]} // Hide default presets in SketchPicker if we have our own
+                    width="220px" // A common width for SketchPicker
+                    styles={{
+                      default: {
+                        picker: {
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.1)',
+                          borderRadius: '4px',
+                          zIndex: 100,
+                        }
+                      }
+                    }}
+                  />
+                </div>
+              )}
+            </div>
           </div>
           <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
             <span>Size:</span>
