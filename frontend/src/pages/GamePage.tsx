@@ -521,7 +521,7 @@ const GamePage: React.FC = () => {
                     <button
                       key={color.value}
                       onClick={() => setSelectedColor(color.value)}
-                      className={`w-[40px] h-[40px] rounded-full border-2 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 transition-all duration-150 ease-in-out
+                      className={`w-[25px] h-[25px] rounded-full border-2 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 transition-all duration-150 ease-in-out
                                   ${selectedColor === color.value ? 'border-blue-700 ring-2 ring-blue-500' : 'border-gray-400 hover:border-gray-600'}`}
                       style={{ backgroundColor: color.value }}
                       title={color.name}
