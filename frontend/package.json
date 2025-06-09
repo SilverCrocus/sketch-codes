@@ -14,6 +14,7 @@
   "description": "",
   "devDependencies": {
     "@types/react": "^19.1.4",
+    "@types/react-color": "^3.0.13",
     "@types/react-dom": "^19.1.5",
     "@vitejs/plugin-react": "^4.4.1",
     "typescript": "^5.8.3",
@@ -23,6 +24,7 @@
     "@types/react-router-dom": "^5.3.3",
     "konva": "^9.3.20",
     "react": "^19.1.0",
+    "react-color": "^2.19.3",
     "react-dom": "^19.1.0",
     "react-konva": "^19.0.3",
     "react-router-dom": "^7.6.0"
