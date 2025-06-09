@@ -122,11 +122,30 @@ const GamePage: React.FC = () => {
   const [selectedColor, setSelectedColor] = useState<string>(PREDEFINED_COLORS[0].value);
   const [selectedBrushSize, setSelectedBrushSize] = useState<number>(BRUSH_SIZES[1].value);
   const [displayColorPicker, setDisplayColorPicker] = useState(false);
+  const colorPickerRef = useRef<HTMLDivElement>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_DELAY_MS = 3000;
 
   // ... rest of the code ...
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (colorPickerRef.current && !colorPickerRef.current.contains(event.target as Node)) {
+        setDisplayColorPicker(false);
+      }
+    };
+
+    if (displayColorPicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+    } else {
+      document.removeEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [displayColorPicker]);
 
   const handleWordCardClick = (index: number) => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
@@ -555,13 +574,8 @@ const GamePage: React.FC = () => {
                 />
               </div>
               {displayColorPicker && (
-                <div style={{ position: 'absolute', zIndex: 100, top: 'calc(100% + 5px)', left: '50%', transform: 'translateX(-50%)' }}> {/* Popover style */}
-                  {/* Cover to close picker on outside click - TEMPORARILY COMMENTED OUT FOR DEBUGGING
-                  <div
-                    style={{ position: 'fixed', top: '0px', right: '0px', bottom: '0px', left: '0px', zIndex: 99 }}
-                    onClick={() => setDisplayColorPicker(false)}
-                  />
-                  */}
+                <div ref={colorPickerRef} style={{ position: 'absolute', zIndex: 100, top: 'calc(100% + 5px)', left: '50%', transform: 'translateX(-50%)' }}> {/* Popover style */}
+                  {/* The useEffect above now handles click outside, so the dedicated overlay div is no longer needed here. */}
                   <SketchPicker
                     color={selectedColor}
                     onChange={(color: ColorResult) => {
