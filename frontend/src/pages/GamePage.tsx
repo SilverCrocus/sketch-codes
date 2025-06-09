@@ -76,6 +76,7 @@ interface GameStatePayload {
   player_identities?: { [clientId: string]: 'a' | 'b' };
   player_cleared_opponent_board?: 'A' | 'B' | null; // Added for new feature
   all_agents_found_message?: string | null; // Message when a player finds all their agents
+  current_clue?: { word: string; number: number } | null; // Current clue for the guessing player
 }
 
 const mapBackendStrokeToFrontendStroke = (backendStroke: BackendStrokePayload): StrokeData => {
@@ -123,6 +124,7 @@ const GamePage: React.FC = () => {
   const [selectedBrushSize, setSelectedBrushSize] = useState<number>(BRUSH_SIZES[1].value);
   const [displayColorPicker, setDisplayColorPicker] = useState(false);
   const colorPickerRef = useRef<HTMLDivElement>(null);
+  const [currentClue, setCurrentClue] = useState<{ word: string; number: number } | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_DELAY_MS = 3000;
@@ -243,6 +245,7 @@ const GamePage: React.FC = () => {
               console.log('[WebSocket INITIAL_GAME_DATA] Set keyCardB:', initialPayload.key_card_b.length > 0 ? initialPayload.key_card_b[0] : 'empty_or_short');
             }
             setAllAgentsFoundMessage(initialPayload.all_agents_found_message || null);
+            setCurrentClue(initialPayload.current_clue || null); // Set current clue
             break;
           case 'STROKE_DRAWN':
             if (message.payload && message.senderClientId !== clientId) {
@@ -277,6 +280,7 @@ const GamePage: React.FC = () => {
             setGameOver(gameState.game_over || false);
             setWinner(gameState.winner || null);
             setConnectedClientIds(gameState.connected_client_ids || []);
+            setCurrentClue(gameState.current_clue || null); // Set current clue
 
             if (Array.isArray(gameState.grid_words)) setGridWords(gameState.grid_words);
             if (Array.isArray(gameState.key_card_a)) {
@@ -480,213 +484,213 @@ const GamePage: React.FC = () => {
   console.log('[GamePage Render] myRole:', myRole);
 
   return (
-    <div>
-      {/* Display message if opponent's board is cleared */}
-      {allAgentsFoundMessage && (
-        <div className="all-agents-found-notification" style={{ backgroundColor: 'lightgreen', color: 'black', padding: '10px', textAlign: 'center', fontWeight: 'bold', margin: '10px 0' }}>
-          {allAgentsFoundMessage}
-        </div>
-      )}
-      {opponentBoardClearedMessage && 
-        <p style={{ backgroundColor: 'lightblue', padding: '10px', textAlign: 'center', fontWeight: 'bold' }}>
-          {opponentBoardClearedMessage}
-        </p>
-      }
-      {!isConnected && <p>Connecting... Attempts: {reconnectAttempts}</p>}
-      {isConnected && <p>Connected as: {clientId} (Role: {myRole})</p>}
-
-      {/* Game Over Logic */}
+    <>
+      {/* Modals: WinModal and generic Game Over message */}
       {gameOver && (
         (winner === 'Players Win! (15 Green Words)') ? (
           <WinModal 
             isOpen={true} 
             onClose={() => {
-              // navigate('/'); // Or implement rematch logic
               console.log('WinModal closed, navigate or rematch needed');
-              // For now, just log. You'll want to navigate or reset game state.
-              setGameOver(false); // Hide modal after close for now
+              setGameOver(false);
               setWinner(null);
             }} 
-            // winnerName prop removed as modal now shows a generic team win message
           />
         ) : (
-          <p style={{ color: 'red', fontWeight: 'bold' }}>Game Over! {winner ? `Winner: ${winner}` : "It's a draw!"}</p>
+          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+            <p className="text-red-500 font-bold text-3xl p-8 bg-gray-800 rounded-lg shadow-xl">
+              Game Over! {winner ? `Winner: ${winner}` : "It's a draw!"}
+            </p>
+          </div>
         )
       )}
+      {/* Consider adding ConnectionLostModal here if it's a separate component */}
 
-      <div style={{ marginBottom: '10px' }}>
-        <button onClick={() => setCurrentTool('pen')} disabled={currentTool === 'pen' || myRole !== 'drawer' || !drawingPhaseActive || drawingSubmitted}>Pen</button>
-        <button onClick={() => setCurrentTool('eraser')} disabled={currentTool === 'eraser' || myRole !== 'drawer' || !drawingPhaseActive || drawingSubmitted}>Eraser</button>
-        {myRole === 'drawer' && <span> Tool: {currentTool} </span>}
-      </div>
+      <div className="flex flex-col min-h-screen bg-gray-200 text-gray-800 font-sans">
+        {/* Top Bar */}
+        <header className="flex justify-between items-center p-3 bg-gray-300 shadow-lg sticky top-0 z-40">
+          <h1 className="text-3xl font-bold text-blue-700">SketchCodes</h1>
 
-      {/* Color and Brush Size Controls */}
-      {myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted && (
-        <>
-          <div style={{ marginBottom: '10px', marginTop: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <span>Color:</span>
-            {PREDEFINED_COLORS.map(color => (
-              <button
-                key={color.value}
-                onClick={() => setSelectedColor(color.value)}
-                style={{
-                  backgroundColor: color.value,
-                  width: '25px',
-                  height: '25px',
-                  border: selectedColor === color.value ? '3px solid darkgrey' : '1px solid lightgrey',
-                  borderRadius: '50%',
-                  cursor: 'pointer',
-                  padding: 0,
-                  outline: 'none',
-                  boxShadow: selectedColor === color.value ? '0 0 5px rgba(0,0,0,0.5)' : 'none',
-                }}
-                title={color.name}
-                disabled={myRole !== 'drawer' || !drawingPhaseActive || drawingSubmitted}
-              />
-            ))}
-            {/* Custom Color Picker Trigger */}
-            <div style={{ position: 'relative', marginLeft: '10px' }}>
-              <div
-                style={{
-                  padding: '5px',
-                  background: '#fff',
-                  borderRadius: '4px', // Rounded corners for the swatch container
-                  boxShadow: '0 0 0 1px rgba(0,0,0,.1)',
-                  display: 'inline-block',
-                  cursor: (isConnected && myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted) ? 'pointer' : 'not-allowed',
-                  opacity: (isConnected && myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted) ? 1 : 0.5,
-                }}
-                onClick={() => {
-                  if (isConnected && myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted) {
-                    setDisplayColorPicker(!displayColorPicker);
-                  }
-                }}
-                title="Select custom color"
-              >
-                <div
-                  style={{
-                    width: '30px', // Slightly larger swatch
-                    height: '20px',
-                    borderRadius: '2px',
-                    background: selectedColor,
-                    border: '1px solid #eee',
-                  }}
-                />
-              </div>
-              {displayColorPicker && (
-                <div ref={colorPickerRef} style={{ position: 'absolute', zIndex: 100, top: 'calc(100% + 5px)', left: '50%', transform: 'translateX(-50%)' }}> {/* Popover style */}
-                  {/* The useEffect above now handles click outside, so the dedicated overlay div is no longer needed here. */}
-                  <SketchPicker
-                    color={selectedColor}
-                    onChange={(color: ColorResult) => {
-                      console.log('SketchPicker onChange:', color.hex);
-                      setSelectedColor(color.hex);
-                    }}
-                    disableAlpha // Assuming no transparency needed for strokes
-                    presetColors={[]} // Hide default presets in SketchPicker if we have our own
-                    width="220px" // A common width for SketchPicker
-                    styles={{
-                      default: {
-                        picker: {
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.1)',
-                          borderRadius: '4px',
-                          zIndex: 100,
-                        }
-                      }
-                    }}
-                  />
+          {/* Center: Drawing Tools (conditionally rendered) */}
+          {myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted && isConnected && (
+            <div className="flex-1 flex flex-col items-center space-y-1 mx-2">
+              <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-1">
+                  <span className="text-xs font-medium mr-1">Color:</span>
+                  {PREDEFINED_COLORS.map(color => (
+                    <button
+                      key={color.value}
+                      onClick={() => setSelectedColor(color.value)}
+                      className={`w-[40px] h-[40px] rounded-full border-2 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 transition-all duration-150 ease-in-out
+                                  ${selectedColor === color.value ? 'border-blue-700 ring-2 ring-blue-500' : 'border-gray-400 hover:border-gray-600'}`}
+                      style={{ backgroundColor: color.value }}
+                      title={color.name}
+                      disabled={!drawingPhaseActive || drawingSubmitted}
+                    />
+                  ))}
                 </div>
-              )}
+                <div className="relative">
+                  <button
+                    onClick={() => { if (isConnected && myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted) setDisplayColorPicker(!displayColorPicker); }}
+                    className="p-0.5 bg-white rounded shadow border border-gray-400 hover:border-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Select custom color"
+                    disabled={!drawingPhaseActive || drawingSubmitted}
+                  >
+                    <div style={{ width: '20px', height: '14px', backgroundColor: selectedColor, borderRadius: '2px' }} />
+                  </button>
+                  {displayColorPicker && (
+                    <div ref={colorPickerRef} className="absolute z-50 top-full mt-1 left-1/2 transform -translate-x-1/2 shadow-xl rounded">
+                      <SketchPicker
+                        color={selectedColor}
+                        onChange={(color: ColorResult) => setSelectedColor(color.hex)}
+                        disableAlpha
+                        presetColors={PREDEFINED_COLORS.map(c => c.value)}
+                        width="200px"
+                        styles={{ default: { picker: { boxShadow: 'none', borderRadius: '4px', border: '1px solid #ccc' }}}}
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center space-x-1">
+                    <button 
+                        onClick={() => setCurrentTool('pen')} 
+                        disabled={currentTool === 'pen' || !drawingPhaseActive || drawingSubmitted}
+                        className={`px-2 py-0.5 border rounded text-xs transition-colors duration-150
+                                    ${currentTool === 'pen' ? 'bg-blue-600 text-white border-blue-700' : 'bg-white hover:bg-gray-100 border-gray-400'}`}
+                    >Pen</button>
+                    <button 
+                        onClick={() => setCurrentTool('eraser')} 
+                        disabled={currentTool === 'eraser' || !drawingPhaseActive || drawingSubmitted}
+                        className={`px-2 py-0.5 border rounded text-xs transition-colors duration-150
+                                    ${currentTool === 'eraser' ? 'bg-gray-600 text-white border-gray-700' : 'bg-white hover:bg-gray-100 border-gray-400'}`}
+                    >Eraser</button>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-medium mr-1">Size:</span>
+                <div className="flex items-center space-x-1">
+                  {BRUSH_SIZES.map(size => (
+                    <button
+                      key={size.name}
+                      onClick={() => setSelectedBrushSize(size.value)}
+                      className={`px-1.5 py-0.5 border rounded text-xs transition-colors duration-150
+                                  ${selectedBrushSize === size.value ? 'bg-blue-600 text-white border-blue-700' : 'bg-white hover:bg-gray-100 border-gray-400'}`}
+                      disabled={!drawingPhaseActive || drawingSubmitted}
+                    >
+                      {size.name} ({size.value}px)
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center space-x-1">
+                  <input
+                    type="range"
+                    id="brushSizeSlider"
+                    min={MIN_BRUSH_SIZE}
+                    max={MAX_BRUSH_SIZE}
+                    value={selectedBrushSize}
+                    onChange={(e) => setSelectedBrushSize(parseInt(e.target.value, 10))}
+                    disabled={!drawingPhaseActive || drawingSubmitted}
+                    className="w-20 h-3 accent-blue-600 cursor-pointer disabled:opacity-50"
+                    title={`Brush/Eraser Size: ${selectedBrushSize}px`}
+                  />
+                  <span className="text-xs w-8 text-right tabular-nums">{selectedBrushSize}px</span>
+                </div>
+              </div>
             </div>
+          )}
+          {!(myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted && isConnected) && (
+            <div className="flex-1 mx-2"></div> 
+          )}
+
+          <div className="text-xs space-y-0 text-right min-w-[140px]">
+            <p><strong>Turn:</strong> <span className="font-mono">{turnNumber}</span></p>
+            <p><strong>Phase:</strong> <span className="font-semibold">{drawingPhaseActive ? 'Drawing' : (guessingActive ? 'Guessing' : 'Waiting')}{drawingSubmitted ? ' (Submitted)' : ''}</span></p>
+            <p><strong>Role:</strong> <span className="font-semibold">{myRole?.charAt(0).toUpperCase() + myRole?.slice(1)}</span></p>
           </div>
-          <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <span>Size:</span>
-            {BRUSH_SIZES.map(size => (
-              <button
-                key={size.name}
-                onClick={() => setSelectedBrushSize(size.value)}
-                style={{
-                  border: selectedBrushSize === size.value ? '2px solid blue' : '1px solid grey',
-                  padding: '5px 8px',
-                  minWidth: '60px',
-                  cursor: 'pointer',
-                  borderRadius: '4px',
-                  fontWeight: selectedBrushSize === size.value ? 'bold' : 'normal',
-                }}
-                disabled={myRole !== 'drawer' || !drawingPhaseActive || drawingSubmitted}
-              >
-                {size.name} ({size.value}px)
-              </button>
-            ))}
-          </div>
-          {/* Slider for Brush/Eraser Size */}
-          <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px', padding: '0 10px' }}>
-            <label htmlFor="brushSizeSlider" style={{ whiteSpace: 'nowrap', marginRight: '5px', fontSize: '0.9em' }}>
-              Size: {selectedBrushSize}px
-            </label>
-            <input
-              type="range"
-              id="brushSizeSlider"
-              min={MIN_BRUSH_SIZE}
-              max={MAX_BRUSH_SIZE}
-              value={selectedBrushSize}
-              onChange={(e) => setSelectedBrushSize(parseInt(e.target.value, 10))}
-              disabled={myRole !== 'drawer' || !drawingPhaseActive || drawingSubmitted}
-              style={{ flexGrow: 1, cursor: 'pointer' }}
-              title={`Brush/Eraser Size: ${selectedBrushSize}px`}
+        </header>
+
+        <main className="flex flex-1 p-2 gap-2 overflow-hidden">
+          <div className="flex-grow-[3] bg-white shadow-xl rounded-lg p-1 flex flex-col items-center justify-center relative overflow-hidden">
+            {allAgentsFoundMessage && (
+              <div className="absolute top-2 left-1/2 transform -translate-x-1/2 bg-green-100 border border-green-500 text-green-700 px-3 py-1.5 rounded-md shadow-md z-10 text-xs font-semibold">
+                {allAgentsFoundMessage}
+              </div>
+            )}
+            {opponentBoardClearedMessage && 
+              <div className="absolute top-2 left-1/2 transform -translate-x-1/2 bg-blue-100 border border-blue-500 text-blue-700 px-3 py-1.5 rounded-md shadow-md z-10 text-xs font-semibold">
+                {opponentBoardClearedMessage}
+              </div>
+            }
+            <DrawingCanvas
+              strokes={myRole === 'drawer' ? [...strokes, ...localStrokes] : strokes}
+              onDrawEnd={handleLocalStrokeEnd}
+              width={800} 
+              height={600}
+              isDrawingEnabled={isConnected && myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted}
+              currentTool={currentTool}
+              selectedColor={selectedColor}
+              selectedBrushSize={selectedBrushSize}
+              className="border border-gray-400 rounded-md shadow-inner bg-gray-50" 
             />
           </div>
-        </>
-      )}
 
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '20px' }}>
-        <WordGrid 
-          gridWords={gridWords} // Corrected prop name
-          // keyCard prop removed as it's not directly used by WordGrid for Duet
-          gridRevealStatus={gridRevealStatus}
-          onCardClick={handleWordCardClick} // Corrected prop name
-          myRole={myRole}
-          activeClueGiverPerspective={perspectiveForGrid}
-          isGuessingActive={guessingActive} // Added prop
-          playerKeyCard={(() => {
-            const cardToPass = playerType === 'a' ? keyCardA : (playerType === 'b' ? keyCardB : []);
-            console.log('[GamePage WordGrid Prop] playerType:', playerType, 'Calculated playerKeyCard for WordGrid:', cardToPass.length > 0 ? cardToPass[0] : 'empty_or_short', 'Full length:', cardToPass.length);
-            return cardToPass;
-          })()} // Pass current player's keycard
-        /> 
-        <DrawingCanvas 
-          strokes={myRole === 'drawer' ? [...strokes, ...localStrokes] : strokes} 
-          onDrawEnd={handleLocalStrokeEnd} 
-          width={800} 
-          height={600}
-          isDrawingEnabled={isConnected && myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted}
-          currentTool={currentTool}
-          selectedColor={selectedColor}
-          selectedBrushSize={selectedBrushSize}
-        />
-      </div>
-      
-      <div style={{ marginTop: '10px' }}>
-        {myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted && isConnected && (
-          <>
-            <button onClick={handleClearCanvas} style={{ marginRight: '10px' }}>Clear My Drawing</button>
-            <button onClick={handleSubmitDrawing}>Submit Drawing</button>
-          </>
-        )}
-        {myRole === 'guesser' && guessingActive && !gameOver && isConnected && (
-          <button onClick={handleEndGuessing}>End Guessing & Start Drawing</button>
-        )}
-      </div>
+          <div className="flex-grow-[1] bg-gray-50 p-2 shadow-xl rounded-lg flex flex-col space-y-2 overflow-y-auto">
+            <h2 className="text-base font-bold text-center text-gray-700 sticky top-0 bg-gray-50 py-1 z-10">Game Board</h2>
+            <WordGrid
+              gridWords={gridWords}
+              gridRevealStatus={gridRevealStatus}
+              onCardClick={handleWordCardClick}
+              myRole={myRole}
+              activeClueGiverPerspective={perspectiveForGrid}
+              isGuessingActive={guessingActive}
+              playerKeyCard={(() => {
+                const cardToPass = playerType === 'a' ? keyCardA : (playerType === 'b' ? keyCardB : []);
+                return cardToPass;
+              })()}
+            />
+            {currentClue && typeof currentClue.word === 'string' && typeof currentClue.number === 'number' && (
+              <div className="mt-auto p-2 bg-yellow-100 border border-yellow-400 rounded-md shadow-md">
+                <p className="text-xs font-semibold text-gray-700">Current Clue:</p>
+                <p className="text-lg font-bold text-yellow-700 text-center">{currentClue.word} - {currentClue.number}</p>
+              </div>
+            )}
+          </div>
+        </main>
 
-      <div style={{ marginTop: '20px', borderTop: '1px solid #ccc', paddingTop: '10px' }}>
-        <h4>Game Info:</h4>
-        <p>Turn: {turnNumber}</p>
-        <p>Drawing Player: {currentDrawingPlayerId || 'N/A'}</p>
-        <p>Guessing Player: {currentGuessingPlayerId || 'N/A'}</p>
-        <p>Phase: {drawingPhaseActive ? 'Drawing' : (guessingActive ? 'Guessing' : 'Waiting')}{drawingSubmitted ? ' (Drawing Submitted)' : ''}</p>
-        <p>Connected Clients: {(Array.isArray(connectedClientIds) ? connectedClientIds : []).join(', ')}</p>
+        <footer className="flex justify-between items-center p-2 bg-gray-300 shadow-lg border-t border-gray-400">
+          <div className="text-xs min-w-[150px]">
+            {!isConnected && <p className="text-red-600 font-semibold">Connecting... (Attempts: {reconnectAttempts})</p>}
+            {isConnected && <p className="text-green-700 font-semibold">Connected as {myRole} ({clientId.substring(0,6)})</p>}
+            <p className="text-gray-600">Players: {(Array.isArray(connectedClientIds) ? connectedClientIds.length : 0)} online</p>
+          </div>
+
+          <div className="flex space-x-2">
+            {myRole === 'drawer' && drawingPhaseActive && !drawingSubmitted && isConnected && (
+              <>
+                <button 
+                  onClick={handleClearCanvas} 
+                  className="px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white rounded shadow-md text-xs font-semibold transition-colors duration-150"
+                >Clear Drawing</button>
+                <button 
+                  onClick={handleSubmitDrawing} 
+                  className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded shadow-md text-xs font-semibold transition-colors duration-150"
+                >Submit Drawing</button>
+              </>
+            )}
+            {myRole === 'guesser' && guessingActive && !gameOver && isConnected && (
+              <button 
+                onClick={handleEndGuessing} 
+                className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded shadow-md text-xs font-semibold transition-colors duration-150"
+              >End Guessing</button>
+            )}
+          </div>
+          
+          <div className="text-xs text-right min-w-[150px] text-gray-600">
+             Game ID: <span className="font-mono">{gameId}</span>
+          </div>
+        </footer>
       </div>
-    </div>
+    </>
   );
 };
 

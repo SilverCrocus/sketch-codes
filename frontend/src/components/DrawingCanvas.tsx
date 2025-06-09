@@ -21,6 +21,7 @@ export interface DrawingCanvasProps {
   currentTool: 'pen' | 'eraser'; // Added currentTool prop
   selectedColor: string; // NEW: Color for the pen
   selectedBrushSize: number; // NEW: Size for pen and eraser
+  className?: string; // Allow passing a className
   // If you have onDrawStart and onDrawMove, their signatures might need tool info too
   // onDrawStart?: (point: { x: number; y: number }) => void;
   // onDrawMove?: (point: { x: number; y: number }) => void;
@@ -36,6 +37,7 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   currentTool,
   selectedColor,      // No default, passed from GamePage
   selectedBrushSize,  // No default, passed from GamePage
+  className,          // Destructure className
 }) => {
   const [isPainting, setIsPainting] = useState(false);
   const [currentPoints, setCurrentPoints] = useState<number[]>([]);
@@ -111,7 +113,8 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
         handleMouseUp(); // Existing call to stop drawing
       }}
       ref={stageRef}
-      style={{ border: '1px solid #ccc', touchAction: 'none' }}
+      style={{ touchAction: 'none' }} // Removed border style, will be handled by className
+      className={className} // Apply the className prop
     >
       <Layer>
         {/* Render completed strokes from prop */} 
