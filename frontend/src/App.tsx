@@ -12,7 +12,7 @@ function App() {
         {/* We can add a "catch-all" route for 404s later if needed */}
       </Routes>
     </div>
-  );
+  )
 }
 
-export default App;
+export default App
