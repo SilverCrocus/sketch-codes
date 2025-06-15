@@ -6,7 +6,11 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
+    "format": "prettier --write .",
+    "check-format": "prettier --check .",
+    "prepare": "husky"
   },
   "keywords": [],
   "author": "",
@@ -14,12 +18,23 @@
   "description": "",
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.8",
+    "@types/node": "^24.0.1",
     "@types/react": "^19.1.4",
     "@types/react-color": "^3.0.13",
     "@types/react-dom": "^19.1.5",
+    "@typescript-eslint/eslint-plugin": "^8.34.0",
+    "@typescript-eslint/parser": "^8.34.0",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.1",
     "postcss": "^8.5.4",
+    "prettier": "^3.5.3",
     "tailwindcss": "^4.1.8",
     "typescript": "^5.8.3",
     "vite": "^6.3.5"
@@ -32,5 +47,9 @@
     "react-dom": "^19.1.0",
     "react-konva": "^19.0.3",
     "react-router-dom": "^7.6.0"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": "eslint --fix",
+    "*.{js,jsx,ts,tsx,json,css,md,html,yaml,yml}": "prettier --write"
   }
 }

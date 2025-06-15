@@ -1,5 +1,5 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -14,7 +14,7 @@ export default defineConfig({
         // Optionally, if your backend /api/words is actually /words,
         // you might need to rewrite:
         // rewrite: (path) => path.replace(/^\/api/, '')
-      }
-    }
-  }
-})
+      },
+    },
+  },
+});

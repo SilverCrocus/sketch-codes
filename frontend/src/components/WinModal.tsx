@@ -1,12 +1,23 @@
 import React from 'react';
+import { PlayerType } from '../types/game'; // Import PlayerType
 
 interface WinModalProps {
   isOpen: boolean;
   onClose: () => void;
-  // winnerName prop is no longer needed for a team win message
+  winner: string | null; // 'a', 'b', or null if no one/draw (though game logic implies a winner)
+  playerType: PlayerType; // To know if the current player is part of the winning team
+  onRestart: () => void;
+  onExit: () => void;
 }
 
-const WinModal: React.FC<WinModalProps> = ({ isOpen, onClose }) => {
+const WinModal: React.FC<WinModalProps> = ({
+  isOpen,
+  onClose,
+  winner,
+  playerType,
+  onRestart,
+  onExit,
+}) => {
   if (!isOpen) return null;
 
   const modalStyle: React.CSSProperties = {
@@ -41,11 +52,36 @@ const WinModal: React.FC<WinModalProps> = ({ isOpen, onClose }) => {
 
   return (
     <>
-      <div style={backdropStyle} onClick={onClose}></div>
+      <div
+        style={backdropStyle}
+        onClick={onClose}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            onClose();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+      ></div>
       <div style={modalStyle}>
-        <h2>Mission Accomplished!</h2>
-        <p>Congratulations, team! You've successfully identified all your agents!</p>
-        <button style={buttonStyle} onClick={onClose}>Play Again?</button> {/* Or 'Close' if no rematch logic yet */}
+        <h2>Game Over!</h2>
+        {winner ? (
+          <p>
+            {winner === playerType
+              ? 'Congratulations, your team won!'
+              : `Team ${winner.toUpperCase()} won!`}
+          </p>
+        ) : (
+          <p>The game ended.</p> // Fallback, though a winner should always be set
+        )}
+        <div style={{ marginTop: '20px' }}>
+          <button style={{ ...buttonStyle, marginRight: '10px' }} onClick={onRestart}>
+            Play Again
+          </button>
+          <button style={buttonStyle} onClick={onExit}>
+            Exit to Lobby
+          </button>
+        </div>
       </div>
     </>
   );

@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 import { Stage, Layer, Line as KonvaLine, Circle } from 'react-konva';
 import Konva from 'konva';
 
@@ -16,7 +16,7 @@ export interface DrawingCanvasProps {
   width: number;
   height: number;
   strokes: StrokeData[];
-  onDrawEnd: (newStroke: Omit<StrokeData, 'id' | 'clientId'>) => void; 
+  onDrawEnd: (newStroke: Omit<StrokeData, 'id' | 'clientId'>) => void;
   isDrawingEnabled: boolean;
   currentTool: 'pen' | 'eraser'; // Added currentTool prop
   selectedColor: string; // NEW: Color for the pen
@@ -35,57 +35,68 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   onDrawEnd,
   isDrawingEnabled,
   currentTool,
-  selectedColor,      // No default, passed from GamePage
-  selectedBrushSize,  // No default, passed from GamePage
-  className,          // Destructure className
+  selectedColor, // No default, passed from GamePage
+  selectedBrushSize, // No default, passed from GamePage
+  className, // Destructure className
 }) => {
   const [isPainting, setIsPainting] = useState(false);
   const [currentPoints, setCurrentPoints] = useState<number[]>([]);
   const stageRef = useRef<Konva.Stage>(null);
   const [cursorPreviewVisible, setCursorPreviewVisible] = useState<boolean>(false);
-  const [cursorPreviewPosition, setCursorPreviewPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [cursorPreviewPosition, setCursorPreviewPosition] = useState<{ x: number; y: number }>({
+    x: 0,
+    y: 0,
+  });
 
-  const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (!isDrawingEnabled) return;
-    setIsPainting(true);
-    const stage = stageRef.current;
-    if (!stage) return;
-    const pos = stage.getPointerPosition();
-    if (!pos) return;
-    setCurrentPoints([pos.x, pos.y]);
-    // onDrawStart?.({ x: pos.x, y: pos.y }); // If using this prop
-  };
+  const handleMouseDown = useCallback(
+    (e: Konva.KonvaEventObject<MouseEvent>) => {
+      if (!isDrawingEnabled) return;
+      setIsPainting(true);
+      const stage = stageRef.current;
+      if (!stage) return;
+      const pos = stage.getPointerPosition();
+      if (!pos) return;
+      setCurrentPoints([pos.x, pos.y]);
+      // onDrawStart?.({ x: pos.x, y: pos.y }); // If using this prop
+    },
+    [isDrawingEnabled, stageRef]
+  );
 
-  const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    const stage = stageRef.current;
-    if (!stage) return;
-    const pos = stage.getPointerPosition();
-    if (!pos) return;
+  const handleMouseMove = useCallback(
+    (e: Konva.KonvaEventObject<MouseEvent>) => {
+      const stage = stageRef.current;
+      if (!stage) return;
+      const pos = stage.getPointerPosition();
+      if (!pos) return;
 
-    // Always update cursor preview position when mouse is over the stage
-    if (isDrawingEnabled) { // Only show preview if drawing is generally possible
+      // Always update cursor preview position when mouse is over the stage
+      if (isDrawingEnabled) {
+        // Only show preview if drawing is generally possible
         setCursorPreviewPosition({ x: pos.x, y: pos.y });
-    }
+      }
 
-    if (!isPainting || !isDrawingEnabled) return;
-    setCurrentPoints(prevPoints => [...prevPoints, pos.x, pos.y]);
-    // onDrawMove?.({ x: pos.x, y: pos.y }); // If using this prop
-  };
+      if (!isPainting || !isDrawingEnabled) return;
+      setCurrentPoints((prevPoints) => [...prevPoints, pos.x, pos.y]);
+      // onDrawMove?.({ x: pos.x, y: pos.y }); // If using this prop
+    },
+    [isDrawingEnabled, isPainting, stageRef]
+  );
 
-  const handleMouseUp = () => {
+  const handleMouseUp = useCallback(() => {
     if (!isPainting || !isDrawingEnabled) return;
     setIsPainting(false);
 
-    let pointsToDraw = [...currentPoints];
+    const pointsToDraw = currentPoints.slice();
 
     // If it's a click without drag (only start point recorded)
     // Duplicate the point to make it a zero-length line, which renders as a dot
     // due to strokeWidth and lineCap: 'round' (which is default for Konva.Line or should be set).
-    if (pointsToDraw.length === 2) { 
+    if (pointsToDraw.length === 2) {
       pointsToDraw.push(pointsToDraw[0], pointsToDraw[1]);
     }
 
-    if (pointsToDraw.length >= 4) { // A line needs at least two (x,y) pairs
+    if (pointsToDraw.length >= 4) {
+      // A line needs at least two (x,y) pairs
       const newStroke: StrokeData = {
         id: Date.now().toString(), // Simple unique ID
         points: pointsToDraw,
@@ -96,7 +107,15 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
       onDrawEnd(newStroke);
     }
     setCurrentPoints([]);
-  };
+  }, [
+    isDrawingEnabled,
+    isPainting,
+    currentPoints,
+    currentTool,
+    selectedColor,
+    selectedBrushSize,
+    onDrawEnd,
+  ]);
 
   return (
     <Stage
@@ -110,29 +129,30 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
       }}
       onMouseLeave={() => {
         setCursorPreviewVisible(false);
-        handleMouseUp(); // Existing call to stop drawing
+        // We still want to call handleMouseUp if the mouse leaves the canvas while painting
+        if (isPainting) {
+          handleMouseUp();
+        }
       }}
       ref={stageRef}
       style={{ touchAction: 'none' }} // Removed border style, will be handled by className
       className={className} // Apply the className prop
     >
       <Layer>
-        {/* Render completed strokes from prop */} 
+        {/* Render completed strokes from prop */}
         {strokes.map((stroke) => (
           <KonvaLine
             key={stroke.id}
             points={stroke.points}
-            stroke={stroke.tool === 'eraser' ? '#ffffff' : stroke.color} 
+            stroke={stroke.tool === 'eraser' ? '#ffffff' : stroke.color}
             strokeWidth={stroke.width}
             tension={0.5} // tension might make single dots less dot-like if points are identical, but fine for actual lines
             lineCap="round" // Crucial for dot rendering
             lineJoin="round"
-            globalCompositeOperation={
-              stroke.tool === 'eraser' ? 'destination-out' : 'source-over'
-            }
+            globalCompositeOperation={stroke.tool === 'eraser' ? 'destination-out' : 'source-over'}
           />
         ))}
-        {/* Render the current line being drawn */} 
+        {/* Render the current line being drawn */}
         {isPainting && currentPoints.length > 0 && (
           <KonvaLine
             points={currentPoints}
@@ -141,9 +161,7 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
             tension={0.5}
             lineCap="round" // Crucial for dot rendering
             lineJoin="round"
-            globalCompositeOperation={
-              currentTool === 'eraser' ? 'destination-out' : 'source-over'
-            }
+            globalCompositeOperation={currentTool === 'eraser' ? 'destination-out' : 'source-over'}
           />
         )}
         {/* Cursor Preview Circle */}
