@@ -2,11 +2,10 @@ import React from 'react';
 import { Routes, Route } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import GamePage from './pages/GamePage';
-import './App.css';
 
 function App() {
   return (
-    <div className="App bg-blue-500 p-4"> 
+    <div className="App bg-blue-500 p-4">
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/game/:gameId" element={<GamePage />} />
@@ -16,4 +15,4 @@ function App() {
   );
 }
 
-export default App;
+export default App
