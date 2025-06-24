@@ -500,7 +500,7 @@ const GamePage: React.FC = () => {
             }} 
           />
         ) : (
-          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.75)' }}>
             <p className="text-red-500 font-bold text-3xl p-8 bg-gray-800 rounded-lg shadow-xl">
               Game Over! {winner ? `Winner: ${winner}` : "It's a draw!"}
             </p>
