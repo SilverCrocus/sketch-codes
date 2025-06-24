@@ -6,7 +6,7 @@ import './App.css';
 
 function App() {
   return (
-    <div className="App bg-blue-500 p-4"> 
+    <div className="App min-h-screen"> 
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/game/:gameId" element={<GamePage />} />
