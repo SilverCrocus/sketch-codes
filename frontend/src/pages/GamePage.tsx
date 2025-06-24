@@ -201,7 +201,10 @@ const GamePage: React.FC = () => {
     if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
     
     const lowerCaseGameId = gameId.toLowerCase();
-    const wsUrl = `ws://localhost:8000/ws/${lowerCaseGameId}/${clientId}`;
+    // Use the current location to determine the WebSocket URL
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = import.meta.env.PROD ? window.location.host : 'localhost:8000';
+    const wsUrl = `${protocol}//${host}/ws/${lowerCaseGameId}/${clientId}`;
     
     if (ws.current && (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)) {
         console.log("WebSocket is already open or connecting. Aborting new connection attempt.");

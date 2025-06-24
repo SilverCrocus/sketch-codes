@@ -31,6 +31,13 @@ origins = [
     "http://127.0.0.1:61583",
 ]
 
+# Add production domain when deployed
+import os
+if os.environ.get("RENDER"):
+    # Add your Render domain here once deployed
+    # Example: origins.append("https://sketch-codes.onrender.com")
+    pass
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -935,4 +942,6 @@ async def serve_spa(full_path: str):
     return FileResponse(index_file_path)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
+    import os
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=False)

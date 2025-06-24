@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: sketch-codes
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: |
+      cd frontend && npm install && npm run build
+      cd ../backend && pip install -r requirements.txt
+    startCommand: cd backend && python main.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0 
