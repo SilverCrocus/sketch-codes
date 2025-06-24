@@ -34,9 +34,11 @@ origins = [
 # Add production domain when deployed
 import os
 if os.environ.get("RENDER"):
-    # Add your Render domain here once deployed
-    # Example: origins.append("https://sketch-codes.onrender.com")
-    pass
+    # Add your actual Render domain here once deployed
+    # Replace with your actual Render URL
+    production_url = os.environ.get("RENDER_EXTERNAL_URL", "https://sketch-codes.onrender.com")
+    origins.append(production_url)
+    print(f"Added production origin: {production_url}")
 
 app.add_middleware(
     CORSMiddleware,
