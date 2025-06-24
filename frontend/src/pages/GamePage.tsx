@@ -203,7 +203,7 @@ const GamePage: React.FC = () => {
     const lowerCaseGameId = gameId.toLowerCase();
     // Use the current location to determine the WebSocket URL
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = import.meta.env.PROD ? window.location.host : 'localhost:8000';
+    const host = import.meta.env.MODE === 'production' ? window.location.host : 'localhost:8000';
     const wsUrl = `${protocol}//${host}/ws/${lowerCaseGameId}/${clientId}`;
     
     if (ws.current && (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)) {

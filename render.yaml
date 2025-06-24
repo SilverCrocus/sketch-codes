@@ -5,8 +5,20 @@ services:
     region: oregon
     plan: free
     buildCommand: |
-      cd frontend && npm install && npm run build
-      cd ../backend && pip install -r requirements.txt
+      echo "Starting build process..."
+      echo "Current directory: $(pwd)"
+      echo "Contents: $(ls -la)"
+      echo "Building frontend..."
+      cd frontend
+      npm ci
+      npm run build
+      echo "Frontend build completed. Contents of frontend/dist:"
+      ls -la dist/ || echo "dist directory not found!"
+      cd ..
+      echo "Installing backend dependencies..."
+      cd backend
+      pip install -r requirements.txt
+      echo "Build process completed!"
     startCommand: cd backend && python main.py
     envVars:
       - key: PYTHON_VERSION

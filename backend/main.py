@@ -929,13 +929,22 @@ async def create_game():
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
     index_file_path = os.path.join(FRONTEND_DIR, "index.html")
+    
+    # Debug logging
+    print(f"Looking for frontend at: {FRONTEND_DIR}")
+    print(f"Frontend directory exists: {os.path.exists(FRONTEND_DIR)}")
+    if os.path.exists(FRONTEND_DIR):
+        print(f"Contents of frontend directory: {os.listdir(FRONTEND_DIR)}")
+    
     if not os.path.exists(FRONTEND_DIR): # Check parent dir first
-        print(f"Warning: Frontend directory not found at {FRONTEND_DIR}. Ensure frontend is built.")
-        return {"message": "Frontend directory not found. Build the frontend."}
+        print(f"Error: Frontend directory not found at {FRONTEND_DIR}")
+        print(f"Current working directory: {os.getcwd()}")
+        print(f"Contents of current directory: {os.listdir('.')}")
+        return {"message": "Frontend directory not found. Build the frontend.", "debug": {"frontend_dir": FRONTEND_DIR, "cwd": os.getcwd()}}
 
     if not os.path.exists(index_file_path) and full_path != "favicon.ico":
         print(f"Warning: index.html not found at {index_file_path}.")
-        return {"message": "index.html not found. Ensure the frontend is built."}
+        return {"message": "index.html not found. Ensure the frontend is built.", "debug": {"index_path": index_file_path}}
     
     potential_file_path = os.path.join(FRONTEND_DIR, full_path)
     if os.path.isfile(potential_file_path):
